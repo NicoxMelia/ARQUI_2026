@@ -43,7 +43,7 @@ module ALU
                 o_result = $signed(in_a) >>> in_b;
             end
             default: begin 
-                o_result = {N_BITS{1'b1}}; 
+                o_result = {N_BITS{1'b0}}; // Ahora devuelve 00 en vez de FF
             end
         endcase
      end

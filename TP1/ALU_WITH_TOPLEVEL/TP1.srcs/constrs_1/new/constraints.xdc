@@ -16,6 +16,9 @@ set_property -dict { PACKAGE_PIN W13 IOSTANDARD LVCMOS33 } [get_ports {i_sw[7]}]
 set_property -dict { PACKAGE_PIN U18 IOSTANDARD LVCMOS33 } [get_ports btn_0]
 set_property -dict { PACKAGE_PIN T18 IOSTANDARD LVCMOS33 } [get_ports btn_1]
 set_property -dict { PACKAGE_PIN W19 IOSTANDARD LVCMOS33 } [get_ports btn_2]
+# Botón Derecho (Clear general)
+set_property -dict { PACKAGE_PIN T17  IOSTANDARD LVCMOS33 } [get_ports btn_clear]
+
 
 # LEDs LD0 a LD7: resultado; LD8: carry
 set_property -dict { PACKAGE_PIN U16 IOSTANDARD LVCMOS33 } [get_ports {o_leds[0]}]
