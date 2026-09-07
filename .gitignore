@@ -1,0 +1,46 @@
+# ==========================================
+# Vivado - Archivos y carpetas a ignorar
+# ==========================================
+
+# Carpetas de compilacion, simulacion y cache
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+
+# Archivos de log, reportes y temporales de Vivado
+*.jou
+*.log
+*.str
+*.pb
+*.wdf
+*.wpc
+*.rst
+*.rpt
+*.rpx
+*.txt
+*.xml
+*.ini
+*.dbg
+*.xdbg
+*.rlx
+*.sdb
+*.mem
+*.svtype
+*.rtti
+
+# Checkpoints y Bitstreams (pesan mucho, se generan localmente)
+*.dcp
+*.bit
+
+# Scripts temporales y ejecutables de simulacion
+*.bat
+*.sh
+*.js
+*.exe
+*.obj
+
+# Archivos de backup
+*.backup.*
+*~
