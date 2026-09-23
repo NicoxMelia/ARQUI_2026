@@ -1,0 +1,938 @@
+% =========================================================================
+%  TP2 - UART + ALU : El flujo de la informacion
+%  Arquitectura de Computadoras - FCEFyN, UNC
+%  Compilar con:  xelatex flujo_tp2.tex  (dos veces, por el indice)
+% =========================================================================
+\documentclass[11pt,a4paper]{article}
+
+% --- Motor y fuentes (xelatex + fontspec por ruta explicita) -------------
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setdefaultlanguage{spanish}
+\setmainfont{texgyrepagella}[
+  Path=/usr/share/texmf/fonts/opentype/public/tex-gyre/,
+  Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+  ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\setsansfont{texgyreheros}[
+  Path=/usr/share/texmf/fonts/opentype/public/tex-gyre/,
+  Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+  ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\setmonofont{texgyrecursor}[
+  Path=/usr/share/texmf/fonts/opentype/public/tex-gyre/,
+  Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+  ItalicFont=*-italic, BoldItalicFont=*-bolditalic, Scale=0.92]
+
+\usepackage{amsmath,amssymb}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,
+                decorations.pathreplacing,fit,backgrounds}
+\usepackage[most]{tcolorbox}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{needspace}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=azul, urlcolor=azul,
+            pdftitle={TP2 UART + ALU - Flujo de la informacion}}
+
+\linespread{1.20}
+
+% Red de seguridad para justificado: si el sistema donde se compila no tiene
+% los patrones de silabeo del espanol, esto evita lineas desbordadas.
+\tolerance=1500
+\emergencystretch=2em
+\hbadness=4000
+
+% --- Paleta -------------------------------------------------------------
+\definecolor{azul}{HTML}{3573C4}
+\definecolor{naranja}{HTML}{D97706}
+\definecolor{violeta}{HTML}{8B5CF6}
+\definecolor{verde}{HTML}{2E8B57}
+\definecolor{gris}{HTML}{4B5563}
+\definecolor{fondo}{HTML}{FCFCFB}
+\pagecolor{fondo}
+
+% --- Cajas --------------------------------------------------------------
+\newtcolorbox{intuicion}[1]{
+  enhanced, colback=verde!6, colframe=verde, coltitle=white,
+  fonttitle=\bfseries\sffamily\small, title={#1},
+  boxrule=0.7pt, arc=2pt, left=5pt, right=5pt, top=4pt, bottom=4pt,
+  breakable}
+
+\newtcolorbox{ficha}[1]{
+  enhanced, colback=azul!5, colframe=azul, coltitle=white,
+  fonttitle=\bfseries\sffamily\small, title={#1},
+  boxrule=0.7pt, arc=2pt, left=5pt, right=5pt, top=4pt, bottom=4pt,
+  breakable}
+
+\newtcolorbox{ojo}[1]{
+  enhanced, colback=naranja!7, colframe=naranja, coltitle=white,
+  fonttitle=\bfseries\sffamily\small, title={#1},
+  boxrule=0.7pt, arc=2pt, left=5pt, right=5pt, top=4pt, bottom=4pt,
+  breakable}
+
+\newtcolorbox{clave}{
+  enhanced, colback=violeta!7, colframe=violeta,
+  boxrule=0.9pt, arc=2pt, left=6pt, right=6pt, top=5pt, bottom=5pt,
+  breakable}
+
+% --- Titulos ------------------------------------------------------------
+\usepackage{titlesec}
+\titleformat{\section}{\Large\bfseries\sffamily\color{azul}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries\sffamily\color{gris}}{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{16pt}{8pt}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\sffamily\footnotesize\color{gris} TP2 --- UART + ALU}
+\fancyhead[R]{\sffamily\footnotesize\color{gris} El flujo de la informaci\'on}
+\fancyfoot[C]{\sffamily\footnotesize\color{gris}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\newcommand{\sg}[1]{\texttt{\small #1}}
+
+% =========================================================================
+\begin{document}
+
+% ---------------------------- PORTADA -----------------------------------
+\begin{titlepage}
+\centering
+\vspace*{2.5cm}
+{\sffamily\Huge\bfseries\color{azul} El flujo de la informaci\'on}\\[0.4cm]
+{\sffamily\LARGE\color{gris} TP2 --- UART + ALU}\\[1.2cm]
+{\large Del byte que sale de la PC al byte que vuelve,\\
+siguiendo el caminito bloque por bloque}\\[2cm]
+
+\begin{tcolorbox}[width=0.82\textwidth, colback=white, colframe=gris,
+                  boxrule=0.7pt, arc=3pt]
+\sffamily\small
+\textbf{\color{azul} C\'omo leer este apunte}\\[4pt]
+\textcolor{verde}{$\blacksquare$} \textbf{Verde:} la intuici\'on. La analog\'ia antes de la f\'ormula.\\[2pt]
+\textcolor{azul}{$\blacksquare$} \textbf{Azul:} la ficha t\'ecnica. Se\~nales, n\'umeros y ciclos exactos.\\[2pt]
+\textcolor{naranja}{$\blacksquare$} \textbf{Naranja:} lo que conviene mirar dos veces, o preguntar en la c\'atedra.\\[2pt]
+\textcolor{violeta}{$\blacksquare$} \textbf{Violeta:} la idea central de la secci\'on. Si le\'es solo esto, ya ganaste algo.
+\end{tcolorbox}
+
+\vfill
+{\sffamily\small\color{gris} Arquitectura de Computadoras --- FCEFyN, UNC \\
+Basys 3 (Artix-7) --- clock de 100\,MHz --- 19200 baud}
+\end{titlepage}
+
+% ------------------- EL TP EN UNA PAGINA --------------------------------
+\section*{El TP2 entero en una p\'agina}
+\addcontentsline{toc}{section}{El TP2 entero en una p\'agina}
+
+La PC manda tres bytes por un cable: el dato \textbf{A}, el dato \textbf{B} y el
+\textbf{c\'odigo de operaci\'on}. La placa contesta un byte: el \textbf{resultado}.
+Eso es todo lo que se ve desde afuera.
+
+Adentro pasa lo siguiente. El cable trae \emph{un bit por vez} y no trae reloj:
+llega un \emph{nivel} que sube y baja, y la FPGA tiene que adivinar d\'onde
+empieza y termina cada bit. Para adivinar bien usa un truco: cuenta mucho m\'as
+r\'apido que el cable. Genera un pulso llamado \sg{s\_tick} \textbf{16 veces por
+cada bit}, y con esos 16 pulsos se ubica justo en el medio del bit, donde la
+se\~nal est\'a m\'as estable, y ah\'i la mira.
+
+Una vez que junt\'o los 8 bits, el byte entra en una cola (\sg{fifo\_rx}) y sale
+del mundo lento del cable para entrar al mundo r\'apido de los 100\,MHz. Ah\'i lo
+levanta una m\'aquina de estados (\sg{intf}) que va llenando tres registros:
+primero A, despu\'es B, despu\'es OP. Cuando tiene los tres, la ALU --- que es
+combinacional pura, sin reloj --- ya tiene el resultado en su salida. La FSM lo
+mete en otra cola (\sg{fifo\_tx}), el transmisor lo saca bit por bit al mismo
+ritmo de 16 ticks por bit, y el byte vuelve a la PC.
+
+\begin{clave}
+\textbf{La idea que hay que llevarse:} en este sistema conviven
+\textbf{tres velocidades} muy distintas --- el clock (10\,ns), el tick
+(3{,}26\,\textmu s) y el bit (52{,}16\,\textmu s) --- y \emph{cada bloque vive en
+una de ellas}. Las colas FIFO existen justamente para que un bloque r\'apido y
+uno lento puedan hablarse sin perder datos. Entender qui\'en vive en qu\'e
+velocidad es entender el TP.
+\end{clave}
+
+\newpage
+\tableofcontents
+\newpage
+
+% =========================================================================
+\section{El vocabulario m\'inimo}
+
+Seis palabras. Si estas seis est\'an claras, el resto del apunte se lee solo.
+
+\begin{ficha}{Las seis palabras}
+\begin{description}[leftmargin=0pt, labelindent=0pt, labelsep=0.45em,
+                    itemsep=5pt, parsep=0pt, topsep=2pt,
+                    font=\bfseries\sffamily\color{azul}]
+\item[Baud rate.] Bits por segundo que viajan por el cable. Ac\'a: 19200. Es la
+  velocidad del \emph{cable}, no la del chip.
+\item[Trama (frame).] El paquetito completo que viaja por el cable: 1 bit de
+  start (siempre 0) $+$ 8 bits de datos $+$ 1 bit de stop (siempre 1). 10 bits
+  en total para transportar 8.
+\item[Sobremuestreo.] Mirar la l\'inea muchas veces por bit. Ac\'a, 16. Sirve
+  para ubicar el centro del bit con precisi\'on de $1/16$ de bit.
+\item[Tick (\texttt{s\_tick}).] Un pulso de \textbf{un solo ciclo de clock} de
+  ancho, que aparece 16 veces por bit. Es el metr\'onomo del UART.
+\item[Pulso de un ciclo.] Una se\~nal que vale 1 durante exactamente un ciclo de
+  clock (\sg{rx\_done\_tick}, \sg{tx\_done\_tick}). Sirve para avisar
+  \emph{``pas\'o algo''} sin trabar nada.
+\item[FIFO.] Una cola. Se escribe por un lado, se lee por el otro, y los dos
+  lados pueden ir a velocidades distintas.
+\end{description}
+\end{ficha}
+
+\begin{intuicion}{Por qu\'e ``as\'incrono''}
+El cable tiene \textbf{una sola l\'inea de datos y ning\'un reloj}. Es como
+alguien que te habla desde la otra punta de la cancha sin que ustedes dos
+hayan acordado un metr\'onomo: vos sab\'es \emph{a qu\'e velocidad} habla
+(los 19200 baud, pactados de antemano), pero no sab\'es \emph{cu\'ando} va a
+empezar la pr\'oxima palabra. Por eso cada trama arranca con un bit de start:
+es el ``ey, escuchame'' que dispara tu cronometraje.
+\end{intuicion}
+
+% =========================================================================
+\section{El mapa: qui\'en le habla a qui\'en}
+
+Antes de recorrer el camino, la foto completa. Las flechas gruesas son datos
+(8 bits), las finas son se\~nales de control (1 bit).
+
+\vspace{4pt}
+\begin{center}
+\begin{tikzpicture}[
+  scale=0.97, transform shape, font=\sffamily\scriptsize,
+  blk/.style={draw=azul!70, rounded corners=2.5pt, minimum height=1.05cm,
+              minimum width=2.0cm, align=center, fill=azul!8, line width=0.8pt},
+  ff/.style={blk, draw=verde!70, fill=verde!10},
+  bg/.style={blk, draw=naranja!80, fill=naranja!12},
+  dato/.style={-{Stealth[length=2.4mm]}, line width=1.6pt, draw=gris!85},
+  ctrl/.style={-{Stealth[length=2mm]}, line width=0.7pt, draw=naranja, densely dashed},
+  lbl/.style={font=\sffamily\tiny, inner sep=1.5pt},
+  sig/.style={font=\sffamily\tiny, text=gris, inner sep=1.5pt}
+]
+
+% --- bloques ---
+\node[blk] (rx)   at (0,2.3)   {\texttt{uart\_rx}};
+\node[ff]  (frx)  at (3.4,2.3) {\texttt{fifo\_rx}};
+\node[blk, minimum height=1.6cm] (intf) at (7.0,1.15) {\texttt{intf}\\[-1pt]\tiny FSM};
+\node[blk, minimum height=1.6cm] (alu)  at (10.3,1.15) {\texttt{ALU}\\[-1pt]\tiny combinacional};
+\node[ff]  (ftx)  at (3.4,0)   {\texttt{fifo\_tx}};
+\node[blk] (tx)   at (0,0)     {\texttt{uart\_tx}};
+\node[bg, minimum height=1.1cm] (bgen) at (-3.3,1.15) {\texttt{baud\_gen}\\[-1pt]\tiny m\'odulo 326};
+
+% --- linea serie ---
+\draw[dato] (-1.55,2.3) -- (rx.west);
+\draw[dato] (tx.west) -- (-1.55,0);
+\node[sig, above] at (-1.3,2.38) {de la PC};
+\node[sig, below] at (-1.3,-0.08) {a la PC};
+
+% --- s_tick ---
+\draw[ctrl] (bgen.east) -- (-2.0,1.15) -- (-2.0,1.72) -- (rx.south);
+\draw[ctrl] (bgen.east) -- (-2.0,1.15) -- (-2.0,0.58) -- (tx.north);
+\node[sig, text=naranja, anchor=west] at (-1.95,1.15) {\texttt{s\_tick}};
+
+% --- rx -> fifo_rx ---
+\draw[dato] (rx.east) -- (frx.west);
+\node[sig, above] at (1.7,2.42) {\texttt{dout}};
+\node[sig, below] at (1.7,2.18) {\texttt{rx\_done\_tick}};
+
+% --- fifo_rx -> intf (datos) ---
+\draw[dato] (frx.east) -- (5.15,2.3) -- (5.15,1.55) -- (intf.west |- 0,1.55);
+\node[sig, above] at (4.72,2.38) {\texttt{r\_data}};
+\node[sig, above] at (5.72,1.58) {\texttt{rx\_empty}};
+% --- intf -> fifo_rx (rd) ---
+\draw[ctrl] (intf.west |- 0,0.75) -- (5.62,0.75) -- (5.62,2.02) -- (frx.east |- 0,2.02);
+\node[sig, text=naranja, below] at (4.72,2.0) {\texttt{rd}};
+
+% --- intf <-> alu ---
+\draw[dato] (intf.east |- 0,1.5) -- (alu.west |- 0,1.5);
+\node[sig, above] at (8.65,1.53) {\texttt{a, b, op}};
+\draw[dato] (alu.west |- 0,0.8) -- (intf.east |- 0,0.8);
+\node[sig, below] at (8.65,0.77) {\texttt{result, carry}};
+
+% --- intf -> fifo_tx ---
+\draw[dato] (intf.south) -- (7.0,-1.05) -- (3.4,-1.05) -- (ftx.south);
+\node[sig, below] at (5.2,-1.05) {\texttt{w\_data} \ / \ \texttt{wr} \ / \ \texttt{tx\_full}};
+
+% --- fifo_tx -> tx ---
+\draw[dato] (ftx.west) -- (tx.east);
+\node[sig, above] at (1.7,0.12) {\texttt{din} / \texttt{tx\_start}};
+\node[sig, below] at (1.7,-0.12) {\texttt{tx\_done\_tick}};
+
+% --- leyenda de mundos ---
+\draw[draw=naranja!45, densely dotted, line width=0.8pt, rounded corners]
+  (-1.35,-0.72) rectangle (1.3,3.05);
+\node[sig, text=naranja, align=center] at (-0.02,3.28) {mundo lento\\[-2pt]ritmo del \texttt{s\_tick}};
+\draw[draw=azul!45, densely dotted, line width=0.8pt, rounded corners]
+  (5.75,-0.72) rectangle (11.45,2.15);
+\node[sig, text=azul, align=center] at (8.6,2.38) {mundo r\'apido --- ritmo del \texttt{clk}};
+\node[sig, text=verde!55!black, align=center] at (3.4,3.28) {frontera\\[-2pt]de velocidades};
+
+\end{tikzpicture}
+\end{center}
+\vspace{-2pt}
+
+\begin{ficha}{El reparto de tareas}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}>{\ttfamily\small}l p{5.1cm} p{4.5cm}@{}}
+\toprule
+\textnormal{\textbf{\sffamily Bloque}} & \textbf{\sffamily Qu\'e hace} & \textbf{\sffamily A qu\'e ritmo vive} \\
+\midrule
+baud\_gen & Cuenta 326 ciclos y tira un tick & clock (100\,MHz) \\
+uart\_rx  & Cuenta ticks y arma el byte & tick (306\,kHz) \\
+fifo\_rx  & Frontera lento $\to$ r\'apido & los dos lados \\
+intf      & Ordena A, B, OP y pide el resultado & clock (100\,MHz) \\
+ALU       & Calcula. No tiene reloj. & instant\'aneo (comb.) \\
+fifo\_tx  & Frontera r\'apido $\to$ lento & los dos lados \\
+uart\_tx  & Cuenta ticks y saca el byte & tick (306\,kHz) \\
+\bottomrule
+\end{tabular}
+\end{ficha}
+
+% =========================================================================
+\section{Las tres escalas de tiempo}
+\label{sec:escalas}
+
+Esta es la secci\'on que hay que entender antes que ninguna otra. Todo el resto
+del apunte se apoya ac\'a.
+
+\begin{intuicion}{La analog\'ia del tren}
+Pens\'a en tres relojes encajados uno adentro del otro:
+\begin{itemize}[leftmargin=1.2em, itemsep=1pt]
+\item El \textbf{clock} es el segundero de un cron\'ometro: tic cada 10\,ns.
+  Todo lo que es \sg{always @(posedge clk)} se mueve con \'el.
+\item El \textbf{tick} es una campanita que suena \textbf{cada 326 tics} del
+  cron\'ometro. El \sg{baud\_gen} es el \'unico que la hace sonar.
+\item El \textbf{bit} en el cable dura \textbf{16 campanitas}.
+\end{itemize}
+El clock es el \'unico reloj f\'isico. El tick y el bit son ficciones que
+construimos contando: el tick contando ciclos de clock, el bit contando ticks.
+\end{intuicion}
+
+\vspace{2pt}
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize, x=1cm, y=1cm]
+% nivel bit
+\draw[fill=azul!12, draw=azul!60, line width=0.6pt] (0,2.1) rectangle (13,2.75);
+\node at (6.5,2.42) {\textbf{1 bit en el cable} = 52,16 \textmu s = 5216 ciclos de clock};
+% nivel tick
+\foreach \i in {0,...,15} {
+  \draw[fill=verde!12, draw=verde!60, line width=0.5pt]
+    (\i*0.8125,1.25) rectangle (\i*0.8125+0.78,1.85);
+}
+\node[align=center] at (6.5,0.95) {\textcolor{verde}{16 ticks}, uno cada 3,26 \textmu s (326 ciclos de clock)};
+% nivel clock
+\draw[fill=naranja!12, draw=naranja!70, line width=0.5pt] (0,0.15) rectangle (0.78,0.6);
+\node[font=\sffamily\tiny] at (0.39,0.375) {326};
+\node[anchor=west, align=left] at (1.0,0.375)
+  {\textcolor{naranja}{326 ciclos de clock} de 10 ns cada uno $=$ 1 tick};
+% llaves
+\draw[decorate, decoration={brace, amplitude=3pt}, draw=verde!70]
+  (0,1.2) -- (0.78,1.2);
+\draw[->, draw=verde!70, line width=0.5pt] (0.39,1.15) -- (0.39,0.68);
+\end{tikzpicture}
+\end{center}
+
+\begin{ficha}{Los n\'umeros, de una vez}
+\[
+M \;=\; \frac{f_{clk}}{\text{BaudRate} \times 16}
+   \;=\; \frac{100\,000\,000}{19200 \times 16}
+   \;=\; 325{,}52 \;\approx\; \mathbf{326}
+\]
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}l r r l@{}}
+\toprule
+\textbf{\sffamily Escala} & \textbf{\sffamily Per\'iodo} & \textbf{\sffamily Frecuencia} & \textbf{\sffamily Qui\'en la genera} \\
+\midrule
+Ciclo de clock        & 10 ns          & 100 MHz    & el cristal de la placa \\
+Tick (\sg{s\_tick})   & 3,26 \textmu s & 306,7 kHz  & \sg{baud\_gen} contando 326 \\
+Bit en el cable       & 52,16 \textmu s& 19,18 kbaud& \sg{uart\_rx}/\sg{uart\_tx} contando 16 ticks \\
+Trama de 10 bits      & 521,6 \textmu s& ---        & la trama completa \\
+\bottomrule
+\end{tabular}
+\end{ficha}
+
+\begin{ojo}{El error de redondeo, y por qu\'e no molesta}
+326 no es 325,52. El bit real dura 52,16 \textmu s en vez de 52,083:
+un error de \textbf{+0,147 por ciento}.
+
+\smallskip
+$\rightarrow$ \textbf{¿Alcanza?} El receptor se resincroniza en cada bit de start,
+as\'i que el error solo se acumula durante \textbf{una trama}. El \'ultimo bit que
+mira (el de stop) lo muestrea 9,5 bits despu\'es del flanco de start. Para no
+equivocarse, el corrimiento acumulado tiene que ser menor a medio bit:
+\[
+\text{tolerancia} \;=\; \frac{0{,}5}{9{,}5} \;=\; 5{,}26 \text{ por ciento}
+\]
+Tenemos 0,147. Estamos 35 veces por debajo del l\'imite. Por eso no hace falta
+ninguna correcci\'on fraccionaria.
+\end{ojo}
+
+% =========================================================================
+\section{El viaje de ida: de la PC a la ALU}
+
+Ahora s\'i, el caminito. Vamos a seguir \textbf{un solo byte} --- digamos el
+dato A $=$ \texttt{0x05} --- desde que sale de la PC hasta que queda guardado en
+un registro adentro de la FPGA.
+
+\subsection{Paso 0 --- La PC suelta el byte}
+
+La PC pone en el cable, en orden y a 19200 bits por segundo:
+
+\vspace{4pt}
+\begin{center}
+\begin{tikzpicture}[font=\sffamily\scriptsize, x=1.05cm, y=0.62cm]
+\foreach \x/\t/\c in {0/start/naranja, 1/1/azul, 2/0/azul, 3/1/azul, 4/0/azul,
+                      5/0/azul, 6/0/azul, 7/0/azul, 8/0/azul, 9/stop/verde} {
+  \draw[fill=\c!12, draw=\c!70, line width=0.6pt] (\x,0) rectangle (\x+0.96,0.85);
+  \node at (\x+0.48,0.42) {\t};
+}
+\foreach \x/\b in {1/D0,2/D1,3/D2,4/D3,5/D4,6/D5,7/D6,8/D7} {
+  \node[font=\sffamily\tiny, gris] at (\x+0.48,-0.35) {\b};
+}
+\node[font=\sffamily\tiny] at (0.48,-0.35) {0};
+\node[font=\sffamily\tiny] at (9.48,-0.35) {1};
+\draw[decorate, decoration={brace, amplitude=4pt}, draw=gris]
+  (9.96,1.05) -- (0,1.05);
+\node[above, font=\sffamily\tiny] at (5,1.2) {10 bits $=$ 521,6 \textmu s};
+\end{tikzpicture}
+\end{center}
+
+\begin{ojo}{El bit menos significativo va primero}
+\texttt{0x05} $=$ \texttt{0000\,0101} en binario, pero por el cable sale
+\texttt{1010\,0000}: \textbf{D0 primero}. Es por esto que en \sg{uart\_rx} el
+shift register se arma metiendo el bit nuevo \emph{por izquierda}:
+\begin{center}\sg{b\_next = \{rx, b\_reg[DBIT-1:1]\};}\end{center}
+Cada bit nuevo empuja a los anteriores hacia la derecha. Cuando entr\'o el octavo,
+el primero que lleg\'o qued\'o en el bit 0. Si esto se hace al rev\'es el byte sale
+espejado y es uno de los bugs cl\'asicos del TP.
+\end{ojo}
+
+\subsection{Paso 1 --- \texttt{baud\_gen}: el metr\'onomo que nunca para}
+
+El \sg{baud\_gen} no espera nada ni le importa lo que pase en el cable. Arranca
+con el reset y cuenta para siempre: $0, 1, 2, \dots, 325, 0, 1, \dots$ Cuando el
+contador vale 325 pone \sg{tick} en 1 durante \textbf{un solo ciclo de clock}, y
+en el siguiente vuelve a 0.
+
+\begin{ficha}{La l\'inea que importa}
+\begin{center}\sg{assign tick = (count\_reg == (M - 1));}\end{center}
+Es combinacional sobre el valor \emph{actual} del contador, no un registro. Por eso
+el pulso dura exactamente un ciclo: al ciclo siguiente el contador ya vale 0 y la
+comparaci\'on da falso. Esto es lo que hace que \sg{s\_tick} sirva como
+\emph{habilitaci\'on} (\emph{clock enable}) y no como un segundo reloj.
+\end{ficha}
+
+\begin{intuicion}{Por qu\'e no se usa el tick como clock}
+Tentaci\'on t\'ipica: ``si necesito algo que vaya a 306\,kHz, ¿por qu\'e no hago
+\sg{always @(posedge tick)}?''. Porque eso crea un \textbf{segundo dominio de
+reloj} dentro del chip, con todos los problemas de cruce de dominios que eso
+trae, y adem\'as en una FPGA una se\~nal generada por l\'ogica no tiene la red de
+distribuci\'on de reloj: llega con \emph{skew} a cada flip-flop.
+
+La forma correcta es la que usa el TP: \textbf{todo corre con el mismo clock de
+100\,MHz}, y el tick se usa como una condici\'on (\sg{if (s\_tick) ...}) que
+habilita el avance. As\'i hay un solo dominio de reloj en todo el dise\~no.
+\end{intuicion}
+
+\subsection{Paso 2 --- El sincronizador: dos flip-flops antes de tocar nada}
+
+La l\'inea \sg{i\_rx} viene de un chip externo y cambia cuando se le canta. No
+tiene ninguna relaci\'on con el clock de 100\,MHz. Si la met\'es directo a un
+flip-flop y justo cambia en el instante del flanco, el flip-flop puede quedar
+\textbf{metaestable}: ni 0 ni 1, oscilando un rato antes de decidirse.
+
+\begin{ficha}{Los dos flip-flops del top}
+\begin{center}
+\sg{rx\_meta <= i\_rx;} \qquad \sg{rx\_sync <= rx\_meta;}
+\end{center}
+El primero es el que se banca la metaestabilidad; el segundo le da un ciclo entero
+para que se estabilice antes de que el resto del dise\~no lo vea. Costo:
+\textbf{20\,ns de retardo}. Contra un bit de 52\,160\,ns, es 0,04 por ciento.
+Gratis.
+
+\smallskip
+En el \sg{.xdc} esto se acompa\~na con \sg{set\_false\_path -from [get\_ports i\_rx]}:
+le avisa a Vivado que no analice el timing de esa entrada, porque ya sabemos que
+es as\'incrona y ya la tratamos.
+\end{ficha}
+
+\subsection{Paso 3 --- \texttt{uart\_rx}: contar ticks para encontrar el centro}
+
+Ac\'a est\'a el coraz\'on del TP. La FSM tiene cuatro estados y dos contadores:
+
+\begin{itemize}[leftmargin=1.3em, itemsep=2pt]
+\item \sg{s\_reg}: cuenta \textbf{ticks} dentro del bit actual (0 a 15).
+\item \sg{n\_reg}: cuenta \textbf{bits de datos} ya recibidos (0 a 7).
+\end{itemize}
+
+\vspace{4pt}
+\begin{center}
+\begin{tikzpicture}[
+  font=\sffamily\scriptsize,
+  st/.style={circle, draw=azul!70, fill=azul!8, minimum size=1.35cm,
+             line width=0.8pt, align=center},
+  ar/.style={-{Stealth[length=2mm]}, line width=0.7pt, draw=gris},
+  lbl/.style={font=\sffamily\tiny, fill=fondo, inner sep=1.5pt}
+]
+\node[st] (idle)  at (0,0)    {IDLE};
+\node[st] (start) at (3.5,0)  {START};
+\node[st] (data)  at (7,0)    {DATA};
+\node[st] (stop)  at (10.5,0) {STOP};
+
+\draw[ar] (idle) -- (start) node[lbl, midway, above] {\texttt{rx==0}}
+                            node[lbl, midway, below] {$s \leftarrow 0$};
+\draw[ar] (start) -- (data)  node[lbl, midway, above] {\texttt{s==7}}
+                            node[lbl, midway, below] {$s,n \leftarrow 0$};
+\draw[ar] (data) -- (stop)   node[lbl, midway, above] {\texttt{s==15 \&\& n==7}};
+\draw[ar] (stop.north) .. controls +(0,1.5) and +(0,1.5) .. (idle.north)
+  node[lbl, midway, above] {\texttt{s==SB\_TICK-1} $\Rightarrow$ \texttt{rx\_done\_tick=1}};
+
+\path[ar] (idle)  edge[loop below, looseness=7, min distance=8mm]
+  node[lbl, below=2pt] {\texttt{rx==1}} (idle);
+\path[ar] (start) edge[loop below, looseness=7, min distance=8mm]
+  node[lbl, below=2pt] {\texttt{s\_tick} $\Rightarrow s \leftarrow s+1$} (start);
+\path[ar] (data)  edge[loop below, looseness=7, min distance=8mm]
+  node[lbl, below=2pt] {\texttt{s\_tick} $\Rightarrow s{+}1$, y cada 16 \, $n{+}1$} (data);
+\path[ar] (stop)  edge[loop below, looseness=7, min distance=8mm]
+  node[lbl, below=2pt] {\texttt{s\_tick} $\Rightarrow s \leftarrow s+1$} (stop);
+\end{tikzpicture}
+\end{center}
+
+\begin{clave}
+\textbf{Los dos n\'umeros m\'agicos son 7 y 15.} En \sg{START} se esperan
+\textbf{8 ticks} (contar hasta 7 desde 0) porque 8 es \emph{medio bit}: eso deja
+al receptor parado en el centro del bit de start. A partir de ah\'i, en
+\sg{DATA} se esperan \textbf{16 ticks} (contar hasta 15) por cada bit, que es
+\emph{un bit entero}. Resultado: cada muestreo cae en el centro del bit
+correspondiente.
+\end{clave}
+
+\subsubsection*{D\'onde cae cada muestra}
+
+Esto es lo que est\'a pasando en el cable mientras la FSM cuenta:
+
+\vspace{4pt}
+\begin{center}
+\begin{tikzpicture}[x=0.245cm, y=1cm, font=\sffamily\tiny]
+\def\hi{0.78}
+% señal rx: idle=1, start=0 (0..16), D0=1 (16..32), D1=0 (32..48), D2=1(48..56)
+\draw[line width=1.1pt, draw=azul]
+  (-6,\hi) -- (0,\hi) -- (0,0) -- (16,0) -- (16,\hi) -- (32,\hi)
+  -- (32,0) -- (48,0) -- (48,\hi) -- (56,\hi);
+% marcas de tick
+\foreach \t in {0,...,56} {
+  \draw[draw=verde!55, line width=0.35pt] (\t,-0.30) -- (\t,-0.14);
+}
+\foreach \t in {0,16,32,48} {
+  \draw[draw=gris!45, densely dotted, line width=0.5pt] (\t,-0.32) -- (\t,1.05);
+}
+% etiquetas de bit
+\node[above] at (-3,\hi) {reposo};
+\node[above] at (8,\hi+0.02) {\textbf{start}};
+\node[above] at (24,\hi+0.02) {\textbf{D0}};
+\node[above] at (40,\hi+0.02) {\textbf{D1}};
+% flechas de muestreo
+\foreach \x/\lb in {8/{s=7}, 24/{s=15}, 40/{s=15}} {
+  \draw[-{Stealth[length=1.8mm]}, draw=naranja, line width=0.9pt]
+    (\x,-0.72) -- (\x,-0.06);
+  \node[below, naranja] at (\x,-0.70) {\lb};
+}
+\node[below, naranja, align=center] at (8,-1.0) {centro del\\bit de start};
+\node[below, naranja, align=center] at (24,-1.0) {muestrea\\y guarda};
+\node[below, naranja, align=center] at (40,-1.0) {muestrea\\y guarda};
+% llave 16 ticks (arriba, para no pisar las etiquetas de muestreo)
+\draw[decorate, decoration={brace, amplitude=3.5pt}, draw=verde!70, line width=0.6pt]
+  (16,1.28) -- (32,1.28);
+\node[above, verde!60!black] at (24,1.32) {16 ticks $=$ 1 bit $=$ 52,16 \textmu s};
+% tick label
+\node[verde!60!black, anchor=west] at (57,-0.22) {\texttt{s\_tick}};
+\end{tikzpicture}
+\end{center}
+\vspace{6pt}
+
+\begin{ficha}{La cuenta exacta, en ticks desde el flanco de start}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}l r r l@{}}
+\toprule
+\textbf{\sffamily Qu\'e} & \textbf{\sffamily Tick n\textsuperscript{o}} & \textbf{\sffamily En bits} & \textbf{\sffamily Estado} \\
+\midrule
+Detecta \sg{rx==0}      & 0   & 0,0 & \sg{IDLE} $\to$ \sg{START} \\
+Centro del bit de start & 8   & 0,5 & \sg{START} $\to$ \sg{DATA} \\
+Muestrea D0             & 24  & 1,5 & \sg{DATA} \\
+Muestrea D1             & 40  & 2,5 & \sg{DATA} \\
+\multicolumn{4}{@{}l}{\quad\dots\ un bit cada 16 ticks \dots} \\
+Muestrea D7             & 136 & 8,5 & \sg{DATA} $\to$ \sg{STOP} \\
+Fin del bit de stop     & 152 & 9,5 & \sg{STOP} $\to$ \sg{IDLE}, \sg{rx\_done\_tick=1} \\
+\bottomrule
+\end{tabular}
+\end{ficha}
+
+\begin{ojo}{Detalle fino: el flanco de start no est\'a alineado con el tick}
+El \sg{baud\_gen} corre libre, as\'i que cuando llega el flanco de bajada de
+\sg{rx} el contador puede estar en cualquier valor entre 0 y 325. Es decir: el
+primer tick despu\'es de entrar en \sg{START} llega en un momento aleatorio,
+entre 0 y 3,26 \textmu s despu\'es.
+
+\smallskip
+Eso mete un error de hasta \textbf{un tick $=$ 1/16 de bit $=$ 6,25 por ciento}
+en la ubicaci\'on del punto de muestreo. Sumado al 0,147 por ciento de deriva
+acumulada, el peor caso queda en $\sim$8 por ciento de bit de corrimiento
+respecto del centro ideal --- todav\'ia muy lejos del 50 por ciento que ser\'ia
+un error. \textbf{Este es el motivo real por el que se sobremuestrea 16 veces y
+no 4:} con 4 ticks por bit, la incertidumbre ser\'ia de 25 por ciento y el margen
+se pondr\'ia inc\'omodo.
+\end{ojo}
+
+\subsection{Paso 4 --- \texttt{rx\_done\_tick}: el aviso de un ciclo}
+
+Cuando la FSM termina el bit de stop levanta \sg{rx\_done\_tick} durante
+\textbf{un ciclo de clock}. No es un flag que queda prendido: es un pulso.
+
+\begin{intuicion}{Por qu\'e un pulso y no un flag}
+Un flag habr\'ia que apagarlo, y apagarlo requiere que alguien avise que ya lo
+ley\'o --- lo que trae un ida y vuelta de handshake. Un pulso de un ciclo se
+autolimpia: quien lo tiene que ver lo ve, porque todos miran el mismo clock.
+Ac\'a el pulso va directo a la entrada \sg{wr} de la FIFO, as\'i que el efecto es
+``escrib\'i este byte, ahora''.
+\end{intuicion}
+
+\subsection{Paso 5 --- \texttt{fifo\_rx}: la frontera entre los dos mundos}
+
+Este es el punto exacto donde el byte cambia de velocidad.
+
+\begin{ficha}{Qu\'e pasa, ciclo por ciclo}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}>{\bfseries\sffamily}l p{11.2cm}@{}}
+\toprule
+Ciclo $N$   & \sg{uart\_rx} est\'a en \sg{STOP} con \sg{s\_reg==15} y llega
+              \sg{s\_tick}. Combinacionalmente: \sg{rx\_done\_tick = 1}. \\
+Flanco $N{\to}N{+}1$ & La FIFO escribe el byte en \sg{array\_reg[w\_ptr]},
+              avanza \sg{w\_ptr} y baja \sg{empty\_reg}. \\
+Ciclo $N{+}1$ & \sg{rx\_empty == 0}. El \sg{intf} lo ve en el mismo ciclo, porque
+              es combinacional sobre \sg{empty\_reg}. Y \sg{r\_data} ya muestra el
+              byte, sin esperar. \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+La FIFO es \emph{first-word fall-through}: \sg{assign r\_data = array\_reg[r\_ptr\_reg];}
+es una lectura combinacional. No hay que pedir el dato y esperar un ciclo: el dato
+de la cabeza de la cola \textbf{siempre} est\'a en la salida.
+\end{ficha}
+
+\begin{ojo}{El truco de los dos flags}
+\sg{w\_ptr} y \sg{r\_ptr} tienen el mismo ancho (4 bits), as\'i que cuando son
+iguales la cola puede estar \textbf{vac\'ia o llena} --- son el mismo estado de los
+punteros. Por eso el m\'odulo lleva dos registros aparte, \sg{full\_reg} y
+\sg{empty\_reg}, en vez de deducirlo comparando punteros. El \sg{case (\{wr, rd\})}
+es lo que los mantiene: escribir baja \sg{empty}, leer baja \sg{full}, y solo si
+el puntero que avanza alcanza al otro se levanta el flag correspondiente.
+\end{ojo}
+
+\begin{intuicion}{¿Y para qu\'e sirve la cola, si el \texttt{intf} es much\'isimo
+m\'as r\'apido?}
+Dos razones concretas.
+
+\smallskip
+\textbf{Una:} el \sg{intf} podr\'ia estar ocupado en \sg{SEND} esperando a que
+se libere la FIFO de transmisi\'on justo cuando llega un byte nuevo. Sin cola,
+ese byte se perder\'ia (eso se llama \emph{overrun}).
+
+\smallskip
+\textbf{Dos:} la cola es lo que permite que la PC dispare las tres tramas
+seguidas sin esperar respuesta. Llegan tres bytes en 1,56\,ms y quedan
+guardados; el \sg{intf} los va sacando a su ritmo. Con 16 lugares de
+profundidad hay margen de sobra.
+\end{intuicion}
+
+\subsection{Paso 6 --- \texttt{intf}: armar la operaci\'on}
+
+La FSM del \sg{intf} vive en el mundo r\'apido: un estado por ciclo de clock.
+Su trabajo es trivial en comparaci\'on con lo que tard\'o el byte en llegar.
+
+\vspace{4pt}
+\begin{center}
+\begin{tikzpicture}[
+  font=\sffamily\scriptsize,
+  st/.style={rounded corners=3pt, draw=azul!70, fill=azul!8, minimum width=2.3cm,
+             minimum height=1.15cm, line width=0.8pt, align=center},
+  ar/.style={-{Stealth[length=2mm]}, line width=0.7pt, draw=gris},
+  lbl/.style={font=\sffamily\tiny, fill=fondo, inner sep=1.5pt}
+]
+\node[st] (a)  at (0,0)    {LOAD\_A\\[-1pt]\tiny $a \leftarrow$ \texttt{r\_data}};
+\node[st] (b)  at (3.7,0)  {LOAD\_B\\[-1pt]\tiny $b \leftarrow$ \texttt{r\_data}};
+\node[st] (op) at (7.4,0)  {LOAD\_OP\\[-1pt]\tiny $op \leftarrow$ \texttt{r\_data}};
+\node[st, fill=verde!10, draw=verde!70] (s) at (11.1,0)
+  {SEND\\[-1pt]\tiny \texttt{w\_data = result}};
+
+\draw[ar] (a) -- (b)  node[lbl, midway, above] {\texttt{!rx\_empty}}
+                      node[lbl, midway, below] {\texttt{rd=1}};
+\draw[ar] (b) -- (op) node[lbl, midway, above] {\texttt{!rx\_empty}}
+                      node[lbl, midway, below] {\texttt{rd=1}};
+\draw[ar] (op) -- (s) node[lbl, midway, above] {\texttt{!rx\_empty}}
+                      node[lbl, midway, below] {\texttt{rd=1}};
+\draw[ar] (s.north) .. controls +(0,1.35) and +(0,1.35) .. (a.north)
+  node[lbl, midway, above] {\texttt{!tx\_full} $\Rightarrow$ \texttt{wr=1} \quad (una operaci\'on completa)};
+
+\foreach \n/\c in {a/{rx\_empty}, b/{rx\_empty}, op/{rx\_empty}, s/{tx\_full}} {
+  \path[ar] (\n) edge[loop below, looseness=6, min distance=7mm]
+    node[lbl, below=2pt] {\texttt{\c}} (\n);
+}
+\node[font=\sffamily\tiny, text=gris, anchor=north] at (5.55,-1.75)
+  {los autoloops son la espera: aqu\'i la FSM pasa el 99,99 por ciento del tiempo};
+\end{tikzpicture}
+\end{center}
+\vspace{4pt}
+
+\begin{ficha}{Los tres estados de carga son id\'enticos}
+Cada uno hace exactamente lo mismo: mirar \sg{rx\_empty}, y si hay algo, levantar
+\sg{rd} y copiar \sg{r\_data} a su registro. Lo \'unico que cambia es
+\emph{en qu\'e registro} guarda y \emph{a qu\'e estado} va. Los autoloops
+(quedarse en el mismo estado mientras \sg{rx\_empty} est\'a en 1) son la espera:
+la FSM se queda ah\'i, ciclo tras ciclo, sin hacer nada, durante los $\sim$52\,000
+ciclos que tarda en llegar el byte siguiente.
+
+\smallskip
+De \sg{LOAD\_OP} solo se toman los 6 bits bajos: \sg{op\_next = r\_data[NB\_OP-1:0];}
+Los dos bits altos del byte se descartan.
+\end{ficha}
+
+\subsection{Paso 7 --- La ALU: el bloque sin reloj}
+
+Cuando el \sg{intf} pasa de \sg{LOAD\_OP} a \sg{SEND}, en ese mismo flanco se
+cargan \sg{op\_reg} y ya estaban cargados \sg{a\_reg} y \sg{b\_reg}. Como la ALU
+es combinacional, su salida se actualiza \textbf{sola}, sin ning\'un flanco de
+clock, apenas cambian sus entradas.
+
+\begin{intuicion}{La ALU como una calculadora siempre encendida}
+No hay que ``disparar'' la ALU ni esperar que termine. Es un enredo de compuertas:
+poneles A, B y OP en la entrada y unos nanosegundos despu\'es el resultado aparece
+en la salida. Mientras A, B y OP no cambien, el resultado se queda ah\'i quieto
+para siempre.
+
+\smallskip
+Por eso el \sg{intf} no necesita ning\'un estado de ``calcular''. Cuando llega a
+\sg{SEND}, el resultado \emph{ya est\'a}: \sg{assign w\_data = i\_alu\_result;}
+conecta la salida de la ALU directo a la entrada de la FIFO de transmisi\'on.
+\end{intuicion}
+
+\begin{ojo}{Lo \'unico que la ALU le exige al resto}
+Que su retardo combinacional entre A/B/OP y el resultado entre en \textbf{un
+per\'iodo de clock (10\,ns)}, porque ese resultado se captura en el flip-flop de
+la FIFO en el flanco siguiente. Para una ALU de 8 bits en un Artix-7 esto sobra:
+el camino cr\'itico es el sumador con acarreo, del orden de 2 a 3\,ns.
+
+\smallskip
+Si la ALU fuera de 64 bits o hiciera una multiplicaci\'on, este camino podr\'ia
+no cerrar timing y habr\'ia que agregar un estado de espera o registrar la salida
+en el medio (\emph{pipeline}).
+\end{ojo}
+
+% =========================================================================
+\section{El viaje de vuelta: de la ALU a la PC}
+
+\subsection{Paso 8 --- \texttt{SEND} y \texttt{fifo\_tx}}
+
+En \sg{SEND}, si \sg{tx\_full} est\'a en 0, el \sg{intf} levanta \sg{wr} durante
+un ciclo. En el flanco, la FIFO de transmisi\'on guarda el resultado y baja su
+\sg{empty}. Aprovecha el mismo ciclo para enganchar el carry en un registro,
+que es lo que despu\'es se ve en el LED 8.
+
+\subsection{Paso 9 --- \texttt{uart\_tx} arranca solo}
+
+Ac\'a hay un detalle lindo del dise\~no. El transmisor no recibe una orden de
+nadie: mira si la cola tiene algo.
+
+\begin{ficha}{El arranque autom\'atico}
+\begin{center}
+\sg{assign tx\_fifo\_not\_empty = \textasciitilde tx\_empty;}\\
+\sg{uart\_tx u\_uart\_tx ( .tx\_start(tx\_fifo\_not\_empty), ... );}
+\end{center}
+Como \sg{uart\_tx} en \sg{IDLE} arranca apenas ve \sg{tx\_start==1}, poner ah\'i
+directamente ``la cola no est\'a vac\'ia'' hace que el transmisor se dispare solo
+y encadene bytes sin que nadie lo coordine. Y del otro lado:
+\begin{center}\sg{.rd(tx\_done\_tick)}\end{center}
+cuando el transmisor termina de sacar un byte, ese mismo pulso lo saca de la cola.
+El lazo se cierra sin una sola l\'inea de control extra.
+\end{ficha}
+
+\subsection{Paso 10 --- El byte sale bit por bit}
+
+El \sg{uart\_tx} recorre los mismos cuatro estados que el receptor, pero al
+rev\'es: en vez de muestrear, \emph{maneja} la l\'inea. En \sg{START} la pone en 0
+y espera 16 ticks; en \sg{DATA} saca \sg{b\_reg[0]} y despu\'es de 16 ticks
+desplaza (\sg{b\_next = b\_reg >> 1}); en \sg{STOP} la pone en 1 durante 16 ticks
+m\'as y levanta \sg{tx\_done\_tick}.
+
+\begin{ojo}{El transmisor no se alinea con el tick al arrancar}
+Cuando \sg{uart\_tx} pasa de \sg{IDLE} a \sg{START}, pone la l\'inea en 0
+\textbf{inmediatamente}, en ese ciclo de clock --- y reci\'en despu\'es empieza a
+contar los 16 ticks. Como el \sg{baud\_gen} corre libre, el primer tick puede
+llegar entre 1 y 326 ciclos despu\'es. Resultado: el \textbf{bit de start puede
+salir hasta 3,26 \textmu s m\'as corto} que los dem\'as (un 6 por ciento).
+
+\smallskip
+$\rightarrow$ ¿Rompe algo? No, porque el receptor del otro lado muestrea en el
+\emph{centro} de cada bit y tiene medio bit de margen. Pero es exactamente el
+tipo de detalle que vale la pena saber contestar si lo preguntan. Si se quisiera
+evitar, bastar\'ia con condicionar la salida de \sg{IDLE} a \sg{if (tx\_start \&\&
+s\_tick)}, a costa de hasta 3,26 \textmu s de latencia extra.
+\end{ojo}
+
+\begin{ficha}{El hueco entre tramas}
+Cuando \sg{tx\_done\_tick} se levanta, en el mismo flanco pasan dos cosas: la FSM
+vuelve a \sg{IDLE} y la FIFO saca el byte. Si qued\'o otro byte encolado,
+\sg{tx\_empty} sigue en 0 y el transmisor arranca de nuevo al ciclo siguiente.
+Es decir: entre dos tramas consecutivas hay \textbf{un ciclo de clock de hueco,
+10\,ns}, contra 521\,600\,ns de trama. Despreciable, y adem\'as la l\'inea queda
+en 1 (reposo), que es exactamente lo que espera el receptor.
+\end{ficha}
+
+% =========================================================================
+\section{El cronograma completo}
+
+Poner los tiempos juntos es lo que hace evidente qui\'en manda ac\'a.
+
+\begin{ficha}{Una operaci\'on de punta a punta}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}>{\sffamily}l r r p{5.9cm}@{}}
+\toprule
+\textbf{Etapa} & \textbf{Duraci\'on} & \textbf{En ciclos} & \textbf{Qui\'en trabaja} \\
+\midrule
+Trama de A            & 521,6 \textmu s  & 52\,160 & cable $+$ \sg{uart\_rx} \\
+Trama de B            & 521,6 \textmu s  & 52\,160 & cable $+$ \sg{uart\_rx} \\
+Trama de OP           & 521,6 \textmu s  & 52\,160 & cable $+$ \sg{uart\_rx} \\
+\textbf{Trabajo del \sg{intf}} & \textbf{40 ns} & \textbf{4} & la FSM completa \\
+C\'alculo de la ALU   & $\sim$3 ns       & $<1$    & combinacional \\
+Trama del resultado   & 521,6 \textmu s  & 52\,160 & \sg{uart\_tx} $+$ cable \\
+\midrule
+\textbf{Total}        & \textbf{2,086 ms}& 208\,644& \\
+\bottomrule
+\end{tabular}
+\end{ficha}
+
+\begin{clave}
+\textbf{El 99,998 por ciento del tiempo se lo lleva el cable.} La l\'ogica que
+escribimos --- la FSM, la ALU, las FIFOs --- ocupa 4 ciclos de clock de los
+208\,644 que dura la operaci\'on. Todo el dise\~no del UART existe para
+adaptar un chip absurdamente r\'apido a un cable absurdamente lento, sin perder
+un solo bit en el camino.
+\end{clave}
+
+\begin{intuicion}{D\'onde se va todo ese tiempo}
+Si el sistema fuera una oficina: el cartero (el cable) tarda medio milisegundo
+en traer cada sobre, y el empleado (la FPGA) resuelve el tr\'amite en 40
+nanosegundos. El empleado pasa el 99,998 por ciento de su jornada mirando la
+puerta. Los autoloops de las FSM --- \sg{rx\_empty} en \sg{LOAD\_A},
+\sg{s\_tick==0} en \sg{DATA} --- son literalmente eso: mirar la puerta.
+\end{intuicion}
+
+% =========================================================================
+\section{Tabla integradora: todas las se\~nales de un vistazo}
+
+\begin{ficha}{Qui\'en genera qu\'e, y qui\'en la consume}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}>{\ttfamily\small}l >{\sffamily\small}l >{\sffamily\small}l p{5.8cm}@{}}
+\toprule
+\textnormal{\textbf{\sffamily Se\~nal}} & \textbf{La genera} & \textbf{La usa} & \textbf{\sffamily Qu\'e significa} \\
+\midrule
+clk          & la placa    & todos         & el \'unico reloj del dise\~no \\
+s\_tick      & baud\_gen   & rx, tx        & pulso de 1 ciclo, 16 por bit \\
+rx\_sync     & el top      & uart\_rx      & la l\'inea serie ya sincronizada \\
+rx\_done\_tick& uart\_rx   & fifo\_rx (wr) & ``termin\'e un byte'' \\
+dout         & uart\_rx    & fifo\_rx      & el byte reci\'en armado \\
+rx\_empty    & fifo\_rx    & intf          & ``no hay nada para leer'' \\
+r\_data      & fifo\_rx    & intf          & cabeza de la cola (combinacional) \\
+rd           & intf        & fifo\_rx      & ``sacame este byte'' \\
+a, b, op     & intf        & ALU           & operandos registrados \\
+result, carry& ALU         & fifo\_tx, LED & salida combinacional \\
+wr           & intf        & fifo\_tx      & ``guardame el resultado'' \\
+tx\_full     & fifo\_tx    & intf          & ``no entra nada m\'as'' \\
+tx\_start    & fifo\_tx    & uart\_tx      & en realidad es \texttt{\textasciitilde tx\_empty} \\
+tx\_done\_tick& uart\_tx   & fifo\_tx (rd) & ``sal\'i un byte entero'' \\
+\bottomrule
+\end{tabular}
+\end{ficha}
+
+% =========================================================================
+\section{Las siete preguntas que m\'as se hacen}
+
+\begin{enumerate}[leftmargin=1.6em, itemsep=7pt]
+
+\item \textbf{¿Por qu\'e 16 ticks por bit y no 1?}\\
+Con 1 tick por bit no hay forma de encontrar el centro: se muestrear\'ia en un
+punto arbitrario, tal vez justo en la transici\'on. Con 16, el punto de muestreo
+queda determinado con precisi\'on de $1/16$ de bit. Es el est\'andar de facto en
+UARTs por hardware.
+
+\item \textbf{¿Por qu\'e \sg{s\_reg} cuenta hasta 7 en \sg{START} y hasta 15 en
+\sg{DATA}?}\\
+7 (o sea 8 ticks) es \emph{medio} bit: lleva al centro del start. 15 (16 ticks) es
+\emph{un} bit entero: mantiene el centrado en cada bit siguiente. Media m\'as
+entera, entera, entera\dots
+
+\item \textbf{¿El \sg{s\_tick} es un reloj?}\\
+No. Es una \emph{habilitaci\'on}. Todos los flip-flops del dise\~no se disparan con
+\sg{clk}; el tick aparece como una condici\'on \sg{if (s\_tick)} adentro de la
+l\'ogica combinacional. Hay un \'unico dominio de reloj.
+
+\item \textbf{¿Por qu\'e hace falta la FIFO si el \sg{intf} es 52\,000 veces m\'as
+r\'apido que el cable?}\\
+Porque ``m\'as r\'apido'' no es ``siempre disponible''. Si el \sg{intf} est\'a
+trabado en \sg{SEND} justo cuando termina de llegar un byte, sin cola ese byte se
+pierde. La FIFO desacopla \emph{disponibilidad}, no solo velocidad.
+
+\item \textbf{¿Cu\'ando calcula la ALU?}\\
+Siempre. No tiene reloj ni se\~nal de arranque. Su salida vale lo que valgan sus
+entradas, permanentemente. El \sg{intf} no la ``dispara'': simplemente se asegura
+de que A, B y OP est\'en cargados antes de leer el resultado.
+
+\item \textbf{¿Qu\'e pasa si la PC manda 4 bytes en vez de 3?}\\
+El cuarto queda en la FIFO y se toma como el \emph{A} de la operaci\'on siguiente.
+El protocolo no tiene forma de resincronizarse: es posicional. Si se quisiera
+robustez habr\'ia que agregar un byte de comando o un \emph{timeout} que vuelva a
+\sg{LOAD\_A}.
+
+\item \textbf{¿Por qu\'e todos los \sg{case} tienen \sg{default}?}\\
+Por dos motivos distintos. En la l\'ogica combinacional, para que ninguna se\~nal
+quede sin asignar en alg\'un camino --- eso sintetizar\'ia un \emph{latch}. Y en
+las FSM, porque es la \emph{m\'aquina de estado segura} de la te\'orica: ante un
+estado inv\'alido (un glitch, una part\'icula), el ciclo siguiente vuelve al
+estado inicial en vez de quedar colgada.
+
+\end{enumerate}
+
+% =========================================================================
+\section{Autoevaluaci\'on}
+
+Si pod\'es contestar estas doce sin volver atr\'as, el flujo est\'a entendido.
+
+\begin{enumerate}[leftmargin=1.6em, itemsep=4pt]
+\item ¿Cu\'antos ciclos de clock dura un bit en el cable? ¿Y cu\'antos ticks?
+\item ¿Qui\'en decide que empieza una trama, y c\'omo se entera?
+\item Si cambiaras el baud rate a 115200, ¿qu\'e n\'umero tocar\'ias y cu\'anto
+      valdr\'ia?
+\item ¿Por qu\'e el shift register del receptor mete el bit nuevo por izquierda?
+\item ¿Qu\'e pasar\'ia si en \sg{START} se contara hasta 15 en vez de hasta 7?
+\item Un byte llega y \sg{rx\_empty} baja. ¿En qu\'e ciclo lo puede leer el
+      \sg{intf}, y por qu\'e no antes?
+\item ¿Por qu\'e \sg{r\_data} est\'a disponible sin esperar un ciclo despu\'es de
+      \sg{rd}?
+\item ¿Cu\'antos ciclos de clock tarda el \sg{intf} en procesar los tres bytes,
+      una vez que ya llegaron todos?
+\item ¿Por qu\'e la ALU no necesita una se\~nal de ``empezar'' ni una de ``listo''?
+\item ¿Qui\'en le dice al \sg{uart\_tx} que tiene que transmitir?
+\item ¿Cu\'anto tiempo de la operaci\'on completa es l\'ogica nuestra y cu\'anto es
+      cable? Dalo en porcentaje.
+\item ¿Por qu\'e la l\'inea \sg{i\_rx} pasa por dos flip-flops antes de entrar al
+      receptor, y qu\'e le cuesta eso al dise\~no?
+\end{enumerate}
+
+\vfill
+\begin{center}
+\sffamily\footnotesize\color{gris}
+TP2 --- Arquitectura de Computadoras --- FCEFyN, UNC
+\end{center}
+
+\end{document}
