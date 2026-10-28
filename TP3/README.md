@@ -39,7 +39,23 @@ Queda en `vivado/TP3.xpr` (no se versiona: se regenera con el script). Los tops 
 make list              # testbenches disponibles
 make sim TB=alu_tb     # corre uno
 make test              # corre todos; falla si alguno no imprime "TEST PASSED: 0 errores"
+make vivado-only       # lista lo que solo se puede probar en Vivado
 ```
+
+El mismo `make test` corre en GitHub Actions en cada PR (check **TP3 - simulacion (Icarus)**), así no hace falta compilar todo en Vivado para revisar un PR. La validación final (xsim, síntesis, timing y placa) se sigue haciendo en Vivado.
+
+### Lo que Icarus no puede compilar
+
+Si un archivo usa algo que solo existe en Vivado (IP como el Clock Wizard, primitivas de Xilinx, etc.), se marca con un comentario:
+
+```verilog
+// REQUIERE_VIVADO: usa el IP Clock Wizard
+```
+
+- En `src/`: se excluye de la compilación con Icarus.
+- En `sim/`: el testbench se saltea y aparece como `REQUIERE VIVADO` (y como advertencia en el check del PR).
+
+Además, el PR lo lista en la sección **Requiere Vivado** de la plantilla, para que quien tenga Vivado lo pruebe antes de aprobar. Conviene que el RTL del core y de la Debug Unit no dependa de IP, para que se pueda probar entero con Icarus.
 
 ### Software de PC
 
