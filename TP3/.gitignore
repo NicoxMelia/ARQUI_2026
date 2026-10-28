@@ -1,0 +1,11 @@
+# Proyecto generado por create_project.tcl
+vivado/
+
+# Salidas de simulacion con Icarus (Makefile)
+build/
+*.vcd
+
+# Python
+__pycache__/
+*.pyc
+.venv/

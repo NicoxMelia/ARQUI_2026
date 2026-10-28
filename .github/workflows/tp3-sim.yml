@@ -1,0 +1,48 @@
+# Corre los testbenches de TP3 con Icarus Verilog en cada PR.
+# Los archivos marcados con "// REQUIERE_VIVADO: <motivo>" no se compilan
+# aca: aparecen como advertencia para que se prueben en Vivado.
+name: TP3 - simulacion (Icarus)
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths: ["TP3/**", ".github/workflows/tp3-sim.yml"]
+  push:
+    branches: [develop]
+    paths: ["TP3/**", ".github/workflows/tp3-sim.yml"]
+
+jobs:
+  testbenches:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: TP3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Icarus Verilog
+        run: sudo apt-get update -q && sudo apt-get install -y -q iverilog
+
+      - name: make test
+        run: make test
+
+      - name: Resumen
+        if: always()
+        run: |
+          {
+            echo "## Testbenches de TP3 (Icarus)"
+            echo
+            if [ -s build/resumen.md ]; then
+              echo "| Archivo | Resultado | Detalle |"
+              echo "|---|---|---|"
+              cat build/resumen.md
+            else
+              echo "No hay testbenches en \`TP3/sim/\` todavia."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep "requiere Vivado\|excluido de Icarus" build/resumen.md 2>/dev/null \
+            | sed -E 's/^\| `([^`]*)` \| [^|]*\| (.*) \|$/::warning title=Probar en Vivado::\1 - \2/' || true
+
+      - name: Logs de los testbenches que fallaron
+        if: failure()
+        run: for f in build/*.log; do echo "::group::$f"; cat "$f"; echo "::endgroup::"; done
