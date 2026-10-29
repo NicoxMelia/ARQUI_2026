@@ -53,3 +53,7 @@
 # Reportes de timing que se guardan como evidencia (TIME-1, TIME-2)
 !TP3/doc/timing/*.rpt
 !TP3/doc/timing/*.txt
+
+# Python
+__pycache__/
+*.pyc

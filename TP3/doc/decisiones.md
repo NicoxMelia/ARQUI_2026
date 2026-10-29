@@ -47,3 +47,26 @@ Plantilla:
 - **Elección:** (b), con flags sticky `frame_err` y `rx_overrun` que la Debug Unit limpia con `clr_err`. El start se detecta por flanco de bajada y se vuelve a verificar en el medio del bit (si la línea volvió a 1 era un glitch). El sincronizador de `rx` pasa a estar adentro de `uart.v`.
 - **Por qué:** un byte con error no sirve para nada en el protocolo: la trama entera se descarta. Por nivel, después de un error de trama la línea sigue en 0 hasta el final del stop y el receptor lo tomaba como un start nuevo y quedaba desincronizado (lo detectó `uart_tb`). Con el sincronizador adentro, cualquier top que use la UART queda protegido contra metaestabilidad.
 - **Issue:** #12
+## D2 - NOP y HALT
+
+- **Contexto:** hace falta una instrucción que no haga nada (burbujas, relleno) y una forma de detener el core.
+- **Opciones:** NOP como `addi x0,x0,0` u otra codificación; HALT como `ebreak`, un `jal` a sí mismo o un opcode propio.
+- **Elección:** NOP = `addi x0, x0, 0` (`0x00000013`); HALT = `ebreak` (`0x00100073`).
+- **Por qué:** ambas son las codificaciones canónicas de RISC-V, así que cualquier ensamblador estándar las produce y no inventamos un opcode propio. `ebreak` es una instrucción real de la ISA, distinta de las 32 del set, y se decodifica comparando la palabra completa.
+- **Issue:** #1
+
+## D3 - Instrucción ilegal = HALT con flag `illegal`
+
+- **Contexto:** qué pasa si el programa no tiene instrucción de parada, o si el PC cae en memoria sin programa.
+- **Opciones:** (a) ignorar la instrucción y seguir; (b) tratarla como NOP; (c) detener el core y avisar.
+- **Elección:** (c). Toda palabra que no decodifica a una de las 32 instrucciones (ni `ebreak`), incluida `0x00000000`, se trata como HALT y levanta el flag `illegal`, que se informa en el DUMP.
+- **Por qué:** con (a) o (b) un programa sin HALT correría hasta recorrer toda la imem. Como LOAD rellena el resto de imem con ceros (D10), un programa sin parada termina siempre en `0x00000000`, se detiene y el flag distingue "terminó por ebreak" de "se cayó fuera del programa".
+- **Issue:** #1
+
+## D4 - Direccionamiento de memoria y PC
+
+- **Contexto:** unidad de direccionamiento y alineación de instrucciones y datos.
+- **Opciones:** memoria direccionada por palabra o por byte.
+- **Elección:** memoria direccionada por byte; instrucciones de 32 bits alineadas a 4; el PC avanza de a 4. Lecturas y escrituras de `lh/lhu/sh` y `lw/sw` se asumen alineadas (a 2 y 4); el comportamiento ante desalineación no está especificado.
+- **Por qué:** es el modelo de RV32I, y `lb/lbu/sb` obligan a acceder por byte. Usar la misma convención que el ensamblador evita conversiones de offsets en `beq`/`bne`/`jal`.
+- **Issue:** #1

@@ -69,8 +69,8 @@ module fifo
 
         case ({wr, rd})
             2'b01: begin                        // solo lectura
-                if (~empty_reg) begin
-                    r_ptr_next = r_ptr_succ;
+                if (~empty_reg) begin   // Verifico que la cola no este vacia para no leer basura
+                    r_ptr_next = r_ptr_succ; //actualizo el proximo estado del puntero de lectura para vanzar 1 posicion
                     full_next  = 1'b0;
                     if (r_ptr_succ == w_ptr_reg)
                         empty_next = 1'b1;
