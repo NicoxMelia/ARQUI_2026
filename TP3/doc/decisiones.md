@@ -63,3 +63,32 @@ Plantilla:
 - **Elección:** memoria direccionada por byte; instrucciones de 32 bits alineadas a 4; el PC avanza de a 4. Lecturas y escrituras de `lh/lhu/sh` y `lw/sw` se asumen alineadas (a 2 y 4); el comportamiento ante desalineación no está especificado.
 - **Por qué:** es el modelo de RV32I, y `lb/lbu/sb` obligan a acceder por byte. Usar la misma convención que el ensamblador evita conversiones de offsets en `beq`/`bne`/`jal`.
 - **Issue:** #1
+
+## D1 - El clock no se toca: el core se controla solo con `ce`
+
+- **Contexto:** para STEP y RUN hay que poder detener y avanzar el core desde la Debug Unit.
+- **Opciones:** (a) compuertar o dividir el clock del core; (b) un clock enable global (`ce`) sobre un único clock.
+- **Elección:** (b). `clk` llega sin modificar a todo el diseño; `ce` habilita PC, latches, banco de registros y escrituras de dmem. STEP es un pulso de `ce` de un ciclo; RUN mantiene `ce=1`.
+- **Por qué:** compuertar el clock genera dominios de reloj extra, skew y problemas de timing en la implementación (además de que complica el análisis de TIME-2). Con `ce` el análisis de timing sigue siendo el de un solo clock y las BRAM usan su enable nativo.
+- **Issue:** #3, #13
+
+## D8 - Interfaz Debug Unit <-> Core
+
+- **Contexto:** la Debug Unit necesita cargar la imem, controlar el avance y leer el estado completo del core.
+- **Opciones:** (a) un bus de lectura genérico con direcciones; (b) buses planos con PC y latches más puertos de dirección para registros y dmem.
+- **Elección:** (b). Detalle completo en [`interfaz_core.md`](interfaz_core.md). Puntos no obvios:
+  - El volcado se hace solo con `ce=0` y desde un snapshot de PC y latches tomado un ciclo después de bajar `ce`.
+  - Cada latch lleva un bit de `valid`, que viaja en el `status` del DUMP; una burbuja es `valid=0` con contenido en cero.
+  - `reset_busy`: limpiar la dmem lleva hasta 1024 ciclos (una BRAM no se resetea de golpe), así que `core_reset` no es instantáneo y la Debug Unit espera.
+  - Latencia fija de 1 ciclo en `dbg_reg_*` y `dbg_dmem_*`, aunque el banco de registros sea combinacional, para que la Debug Unit no dependa de la implementación.
+  - Los latches se dumpean tal como están en el hardware: `rdata` en MEM/WB sin extender, `alu_op` como `{funct7[5], funct3}`.
+- **Por qué:** los buses planos hacen que el volcado no necesite lógica de lectura en el core ni sepa de pipelines, y los anchos fijos dan un payload de 181 B (≈ 16 ms a 115200). Dumpear los latches sin transformar mantiene el core simple y deja la interpretación al software de PC.
+- **Issue:** #3
+
+## D11 - `dmem_hwm` y volcado del rango usado
+
+- **Contexto:** la dmem tiene 4 KB; volcarla entera en cada STEP costaría ≈ 0,36 s a 115200.
+- **Opciones:** (a) volcar toda la dmem; (b) que el PC pida el rango; (c) llevar la mayor dirección escrita y volcar solo hasta ahí.
+- **Elección:** (c) más (b): el core expone `dmem_hwm` (13 bits) = **mayor dirección de byte escrita + 1** (0 = vacía); se reinicia con `core_reset`. READ_DMEM con `count = 0` devuelve `ceil(dmem_hwm / 4)` palabras desde `addr`. El DUMP no incluye la dmem.
+- **Por qué:** guardar "dirección + 1" evita un bit extra para distinguir "vacía" de "se escribió la dirección 0", y los programas típicos usan pocos bytes de dmem. Sacar la dmem del DUMP mantiene el volcado en 181 B fijos.
+- **Issue:** #3, #27
