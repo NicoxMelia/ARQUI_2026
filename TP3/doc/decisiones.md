@@ -40,6 +40,13 @@ Plantilla:
 - **Por qué:** es la opción más simple en hardware y evita interpretar a medias tramas con argumentos (por ejemplo, los datos de un LOAD contienen bytes que coinciden con códigos de comando). La librería del PC no permite enviar otros comandos durante RUN, así que el descarte no pierde información útil. Detalle en `protocolo_uart.md`, sección 5.
 - **Issue:** #2
 
+## D13 - Receptor UART: errores de trama, overrun y detección del start
+
+- **Contexto:** la UART de TP2 no verificaba el bit de stop y descartaba en silencio los bytes que llegaban con la FIFO de recepción llena. El protocolo (`protocolo_uart.md`) necesita detectar ambos casos para responder NACK `0x05`.
+- **Opciones:** (a) guardar el byte con error y marcarlo; (b) descartarlo y levantar un flag; para el start, detectar por nivel (TP2) o por flanco.
+- **Elección:** (b), con flags sticky `frame_err` y `rx_overrun` que la Debug Unit limpia con `clr_err`. El start se detecta por flanco de bajada y se vuelve a verificar en el medio del bit (si la línea volvió a 1 era un glitch). El sincronizador de `rx` pasa a estar adentro de `uart.v`.
+- **Por qué:** un byte con error no sirve para nada en el protocolo: la trama entera se descarta. Por nivel, después de un error de trama la línea sigue en 0 hasta el final del stop y el receptor lo tomaba como un start nuevo y quedaba desincronizado (lo detectó `uart_tb`). Con el sincronizador adentro, cualquier top que use la UART queda protegido contra metaestabilidad.
+- **Issue:** #12
 ## D2 - NOP y HALT
 
 - **Contexto:** hace falta una instrucción que no haga nada (burbujas, relleno) y una forma de detener el core.
