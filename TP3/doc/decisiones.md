@@ -148,6 +148,7 @@ stateDiagram-v2
 - **Elección:** (c), para BAD_ARG y UART_ERR. Un error de UART en IDLE (no hay comando válido) se informa como NACK con `cmd = 0x00`. TIMEOUT ya llega con la línea en silencio y se responde enseguida; UNKNOWN_CMD es una trama de un byte y también.
 - **Por qué:** con (a) un LOAD rechazado generaría decenas de respuestas espurias. Con (b) el PC recibe el NACK mientras sigue enviando y podría mandar el comando siguiente antes de que la FSM termine de descartar. Con (c) el NACK llega cuando la FPGA ya está en IDLE y limpia, así que el PC puede reintentar enseguida. Cuesta 10 ms de latencia en un caso de error, que es irrelevante. Durante el descarte se mantiene `clr_err` para que los errores de esos bytes no generen un segundo NACK.
 - **Issue:** #13
+
 ## D7 - Memorias detrás de un wrapper
 
 - **Contexto:** el core necesita imem y dmem; la forma de implementarlas (arreglo inferido como BRAM, IP de Xilinx, init desde archivo) puede cambiar según lo que dé la síntesis, y los testbenches con Icarus no pueden usar IP.

@@ -410,10 +410,10 @@ module debug_unit_tb;
             bad = 0;
             for (k = 0; k < 1024; k = k + 1) begin
                 e = (k < n) ? prog[k] : 32'h0;
-                if (u_core.imem[k] !== e) begin
+                if (u_core.u_imem.mem[k] !== e) begin
                     if (bad < 4)
                         $display("ERROR %0s: imem[%0d] = %h, esperado %h",
-                                 name, k, u_core.imem[k], e);
+                                 name, k, u_core.u_imem.mem[k], e);
                     bad = bad + 1;
                 end
             end
@@ -438,7 +438,7 @@ module debug_unit_tb;
 
     initial begin
         // imem sucia: despues de un LOAD solo tiene que quedar el programa nuevo
-        for (i = 0; i < 1024; i = i + 1) u_core.imem[i] = 32'hDEAD0000 | i;
+        for (i = 0; i < 1024; i = i + 1) u_core.u_imem.mem[i] = 32'hDEAD0000 | i;
 
         wait_cycles(5);
         rst = 1'b0;
@@ -518,11 +518,13 @@ module debug_unit_tb;
             prog[i] = NOP | (i << 20);              // addi x0, x0, i
         load_prog("LOAD 1024", 1024);
         check_imem("imem tras LOAD 1024", 1024);
+        // El stub hace un fetch por ciclo y con PC >= 4096 la imem devuelve
+        // 0 (ilegal, D3): el STOP tiene que llegar antes de ~1000 ciclos.
+        // RUN y el byte basura salen seguidos (un byte cada 320 ciclos).
         send(8'h05);
-        wait_cycles(1000);
         send(8'h01);                                // se descarta
-        send(8'h7F);                                // se descarta
-        expect_silence("bytes durante RUN", 2000);
+        wait_cycles(700);                           // ya llegaron RUN y el 0x01
+        check("bytes durante RUN", rx_cnt - rx_pos, 0);
         check("ce sigue en 1 durante RUN", ce, 1);
         send(8'h06);
         // El PC depende del instante del STOP: tiene que coincidir con el del core
