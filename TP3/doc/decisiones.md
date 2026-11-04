@@ -99,3 +99,11 @@ Plantilla:
 - **Elección:** (c) más (b): el core expone `dmem_hwm` (13 bits) = **mayor dirección de byte escrita + 1** (0 = vacía); se reinicia con `core_reset`. READ_DMEM con `count = 0` devuelve `ceil(dmem_hwm / 4)` palabras desde `addr`. El DUMP no incluye la dmem.
 - **Por qué:** guardar "dirección + 1" evita un bit extra para distinguir "vacía" de "se escribió la dirección 0", y los programas típicos usan pocos bytes de dmem. Sacar la dmem del DUMP mantiene el volcado en 181 B fijos.
 - **Issue:** #3, #27
+
+## D7 - Memorias detrás de un wrapper
+
+- **Contexto:** el core necesita imem y dmem; la forma de implementarlas (arreglo inferido como BRAM, IP de Xilinx, init desde archivo) puede cambiar según lo que dé la síntesis, y los testbenches con Icarus no pueden usar IP.
+- **Opciones:** (a) instanciar la memoria directo en el core; (b) un módulo wrapper por memoria con puertos fijos.
+- **Elección:** (b). `imem.v` (MEM-1) expone un puerto de escritura para el loader (`wr_en`, `wr_addr` en palabras, `wr_data`, sin depender de `ce`) y uno de lectura síncrona (`rd_en`, `rd_clr`, `rd_addr` en bytes, `rd_data`). La salida registrada es el campo `instr` del latch IF/ID; `rd_clr` la pone en cero para las burbujas. Un PC fuera de los 4 KB devuelve `0x00000000` (ilegal, D3). `dmem.v` (MEM-2) sigue el mismo criterio.
+- **Por qué:** cambiar la implementación no toca el core ni la Debug Unit, y el wrapper se simula entero con Icarus. Que la salida registrada de la memoria sea el latch evita un registro extra y respeta que las BRAM tienen la lectura síncrona. En el mismo ciclo de lectura y escritura de una palabra gana la lectura vieja (read-first), que no importa porque el loader escribe con el core detenido.
+- **Issue:** #9, #10

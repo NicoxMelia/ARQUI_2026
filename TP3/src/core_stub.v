@@ -12,9 +12,8 @@
 //     halted + illegal (D3). Despues de eso el PC no avanza y IF/ID se vacia.
 // Los demas latches (ID/EX, EX/MEM, MEM/WB) quedan en cero.
 //
-// La imem esta adentro del stub (solo para no depender de MEM-1). En el core
-// real va detras del wrapper imem.v (D7) y este modulo se reemplaza por core.v
-// con los mismos puertos.
+// La imem es el wrapper imem.v (MEM-1, D7), el mismo que usara el core real,
+// que reemplaza a este modulo con los mismos puertos.
 
 module core_stub #(
     // Ciclos que dura el barrido de limpieza tras core_reset (el core real
@@ -55,13 +54,9 @@ module core_stub #(
 
     localparam [31:0] EBREAK = 32'h00100073;
 
-    reg [31:0] imem [0:1023];
-    integer    k;
-    initial for (k = 0; k < 1024; k = k + 1) imem[k] = 32'h0;
-
     reg [31:0] pc;
     reg [31:0] if_id_pc;
-    reg [31:0] if_id_instr;
+    wire [31:0] if_id_instr;
     reg        if_id_valid;
     reg        halt_seen;
     reg        illegal_r;
@@ -78,9 +73,18 @@ module core_stub #(
     wire is_ill   = if_id_valid & (if_id_instr == 32'h0);
     wire stop     = halt_seen | is_halt | is_ill;
 
-    // El loader escribe sin importar ce
-    always @(posedge clk)
-        if (imem_we) imem[imem_addr] <= imem_wdata;
+    // La salida registrada de la imem es el campo instr de IF/ID: se carga con
+    // la lectura y se pone en cero con la burbuja (reset o instruccion de parada).
+    wire fetch = ce_eff & ~stop;
+
+    imem u_imem (
+        .clk(clk),
+        .wr_en(imem_we), .wr_addr(imem_addr), .wr_data(imem_wdata),
+        .rd_en(fetch & ~clr),
+        .rd_clr(clr | (ce_eff & stop)),
+        .rd_addr(pc),
+        .rd_data(if_id_instr)
+    );
 
     always @(posedge clk) begin
         if (clr) begin
@@ -94,20 +98,17 @@ module core_stub #(
         if (clr) begin
             pc          <= 32'h0;
             if_id_pc    <= 32'h0;
-            if_id_instr <= 32'h0;
             if_id_valid <= 1'b0;
             halt_seen   <= 1'b0;
             illegal_r   <= 1'b0;
         end else if (ce_eff) begin
             if (stop) begin
                 if_id_pc    <= 32'h0;
-                if_id_instr <= 32'h0;
                 if_id_valid <= 1'b0;
                 if (is_halt | is_ill) halt_seen <= 1'b1;
                 if (is_ill)           illegal_r <= 1'b1;
             end else begin
                 if_id_pc    <= pc;
-                if_id_instr <= imem[pc[11:2]];
                 if_id_valid <= 1'b1;
                 pc          <= pc + 32'd4;
             end
