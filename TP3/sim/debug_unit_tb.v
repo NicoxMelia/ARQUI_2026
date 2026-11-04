@@ -372,9 +372,9 @@ module debug_unit_tb;
     integer ce0;
 
     initial begin
-        // Programa en la imem del stub: 4 NOP y ebreak (el loader llega en DBG-3)
-        for (i = 0; i < 4; i = i + 1) u_core.imem[i] = NOP;
-        u_core.imem[4] = EBREAK;
+        // Programa en la imem del stub: 4 NOP y ebreak (acceso jerarquico a la imem de MEM-1; el loader llega en DBG-3)
+        for (i = 0; i < 4; i = i + 1) u_core.u_imem.mem[i] = NOP;
+        u_core.u_imem.mem[4] = EBREAK;
 
         wait_cycles(5);
         rst = 1'b0;
@@ -424,13 +424,15 @@ module debug_unit_tb;
         send(8'h07);
         expect_dump("DUMP tras RESET", 8'h04, 0, 384'd0);   // pipeline_empty
 
-        // 8. RUN sin HALT (todo NOP): solo STOP lo detiene
-        for (i = 0; i < 1024; i = i + 1) u_core.imem[i] = NOP;
+        // 8. RUN sin HALT (todo NOP): solo STOP lo detiene.
+        // El stub hace un fetch por ciclo y con PC >= 4096 la imem devuelve
+        // 0 (ilegal, D3): el STOP tiene que llegar antes de ~1000 ciclos.
+        // RUN y el byte basura salen seguidos (un byte cada 320 ciclos).
+        for (i = 0; i < 1024; i = i + 1) u_core.u_imem.mem[i] = NOP;
         send(8'h05);
-        wait_cycles(1000);
         send(8'h01);                                // se descarta
-        send(8'h7F);                                // se descarta
-        expect_silence("bytes durante RUN", 2000);
+        wait_cycles(700);                           // ya llegaron RUN y el 0x01
+        check("bytes durante RUN", rx_cnt - rx_pos, 0);
         check("ce sigue en 1 durante RUN", ce, 1);
         send(8'h06);
         // El PC depende del instante del STOP: tiene que coincidir con el del core
