@@ -81,7 +81,9 @@ Plantilla:
 
 ### Diagrama de estados de la Debug Unit (DBG-2)
 
-`src/debug_unit.v` es una FSM one-hot. `ce` solo vale 1 en `STEP` (un ciclo) y en `RUN`; `core_reset` solo en `RST`. Ninguno de los dos sube mientras el core tiene `reset_busy`.
+`src/debug_unit.v` es una FSM one-hot. `ce` solo vale 1 en `STEP` (un ciclo) y en `RUN`; `core_reset` solo en `RST`; `imem_we` solo en `LOAD_DATA` y `LOAD_FILL` (DBG-3). `ce` no sube mientras el core tiene `reset_busy`.
+
+Correspondencia con los estados que pide la issue: LOADING = `LOAD_DATA` + `LOAD_FILL`, RUNNING = `RUN`, DUMPING = `HOLD` + `SNAP` + `TX_PREP`/`TX_WR`, STOPPED = `IDLE` (con `ce=0` el core queda detenido hasta el próximo comando).
 
 ```mermaid
 stateDiagram-v2
@@ -96,10 +98,17 @@ stateDiagram-v2
     ARGS --> ARGS: byte de argumento
     ARGS --> TX_PREP: timeout / NACK 0x02
     ARGS --> DRAIN: BAD_ARG, UART_ERR
+    ARGS --> RST: len de LOAD valido (reset completo, D10)
     DRAIN --> DRAIN: byte recibido (se descarta)
     DRAIN --> TX_PREP: 10 ms sin bytes / NACK
     RST --> RST_WAIT: core_reset = 1
-    RST_WAIT --> TX_PREP: !reset_busy / ACK
+    RST_WAIT --> TX_PREP: !reset_busy (RESET) / ACK
+    RST_WAIT --> LOAD_DATA: !reset_busy (LOAD)
+    LOAD_DATA --> LOAD_DATA: byte de datos (escribe la imem cada 4)
+    LOAD_DATA --> LOAD_FILL: ultima palabra
+    LOAD_DATA --> TX_PREP: timeout / NACK 0x02
+    LOAD_DATA --> DRAIN: UART_ERR
+    LOAD_FILL --> TX_PREP: imem completa / ACK [words][xor]
     STEP --> HOLD: !reset_busy, ce = 1 un ciclo
     RUN --> HOLD: halted && pipeline_empty, o STOP
     HOLD --> SNAP: ce = 0 un ciclo

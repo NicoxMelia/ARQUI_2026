@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////
-// debug_unit_tb - Testbench autochequeante de la Debug Unit (DBG-2, DBG-4)
+// debug_unit_tb - Testbench autochequeante de la Debug Unit (DBG-2/3/4)
 //
 // Sistema completo por la linea serie:
 //   UART "PC" (la maneja el testbench) <-> UART + debug_unit <-> core_stub
@@ -8,26 +8,30 @@
 // byte cada 320 ciclos) y un timeout de 2000 ciclos (unos 6 tiempos de byte).
 //
 // Casos:
-//   1. PING -> ACK.
-//   2. Comando desconocido -> NACK 0x01.
-//   3. STEP: ce en 1 exactamente un ciclo por STEP; el volcado muestra el PC
-//      avanzando de a 4 y el status del stub.
-//   4. DUMP: no mueve ce.
-//   5. RUN hasta ebreak: termina solo con halted && pipeline_empty.
-//   6. STEP con el core detenido: no cambia el estado.
-//   7. STOP fuera de RUN -> ACK. RESET -> ACK y PC = 0.
-//   8. RUN sin HALT: los bytes que no son STOP se descartan y STOP detiene.
-//   9. Tramas truncadas (LOAD y READ_DMEM) -> NACK 0x02 por timeout.
-//  10. LOAD con len fuera de rango -> un unico NACK 0x03 (se descartan datos).
-//  11. Error de trama en IDLE y a mitad de trama -> NACK 0x05.
-//  12. Nunca sube ce con reset_busy ni con core_reset.
-//  13. Volcado (DBG-4): todos los DUMP se comparan byte a byte (185 B) contra
+//   1. PING -> ACK. Comando desconocido -> NACK 0x01.
+//   2. LOAD (DBG-3) sobre una imem sucia y un core que ya avanzo: ACK con
+//      words y xor, core_reset antes de la primera escritura (D10), datos en
+//      0..len-1 y ceros en el resto, PC = 0 despues.
+//   3. STEP: ce en 1 exactamente un ciclo; tras LOAD de N palabras, N STEP
+//      muestran en IF/ID la palabra N-esima. DUMP no mueve ce.
+//   4. RUN hasta ebreak; STEP y RUN con el core detenido no cambian nada.
+//   5. STOP fuera de RUN -> ACK. RESET -> ACK y PC = 0.
+//   6. Segundo LOAD mas corto: solo queda el programa nuevo y el core se
+//      detiene en el primer cero (illegal, D3).
+//   7. LOAD de 1024 palabras (sin relleno) y RUN sin HALT: los bytes que no
+//      son STOP se descartan y STOP detiene.
+//   8. Tramas truncadas (len, datos de LOAD, READ_DMEM) -> NACK 0x02.
+//   9. LOAD con len fuera de rango -> un unico NACK 0x03 (se descartan datos).
+//  10. Error de trama en IDLE, en len y en los datos de LOAD -> NACK 0x05.
+//  11. Volcado (DBG-4): todos los DUMP se comparan byte a byte (185 B) contra
 //      un modelo. Entre el stub y la DU el banco de registros pasa por un
 //      registro (latencia real de 1 ciclo, el peor caso del contrato) y con
 //      pat_en los latches y registros toman patrones distintos byte a byte
 //      para verificar el orden. Cambiar los latches mientras se transmite no
 //      altera el volcado (snapshot).
-// Despues de cada error se verifica con PING que la FSM no quedo colgada.
+// Siempre: ce nunca sube con reset_busy, la imem nunca se escribe con ce=1,
+// fsm_state es one-hot. Despues de cada error se verifica con PING que la
+// FSM no quedo colgada.
 //
 // Con Icarus:  make sim TB=debug_unit_tb
 //////////////////////////////////////////////////////////////////////////////
@@ -113,7 +117,7 @@ module debug_unit_tb;
     wire [63:0]  dbg_if_id;
     wire [159:0] dbg_id_ex;
     wire [79:0]  dbg_ex_mem, dbg_mem_wb;
-    wire [10:0]  fsm_state;
+    wire [12:0]  fsm_state;
 
     // Lo que ve la Debug Unit: el stub o, con pat_en, patrones conocidos
     reg          pat_en  = 1'b0;
@@ -172,6 +176,9 @@ module debug_unit_tb;
     // Monitores
     // ------------------------------------------------------------------
     integer ce_cnt = 0;             // ciclos con ce = 1
+    time    load_t0 = 0;            // inicio del ultimo LOAD
+    time    cr_t    = 0;            // ultimo ciclo con core_reset
+    time    we_t    = 0;            // primera escritura de imem desde load_t0
 
     always @(posedge clk) begin
         if (ce) ce_cnt <= ce_cnt + 1;
@@ -179,7 +186,13 @@ module debug_unit_tb;
             $display("ERROR: ce en 1 con reset_busy (t=%0t)", $time);
             errors = errors + 1;
         end
-        if (~rst && ((fsm_state & (fsm_state - 11'd1)) != 11'd0 || fsm_state == 11'd0)) begin
+        if (~rst && imem_we && ce) begin
+            $display("ERROR: escritura de imem con ce en 1 (t=%0t)", $time);
+            errors = errors + 1;
+        end
+        if (core_reset) cr_t <= $time;
+        if (imem_we && we_t < load_t0) we_t <= $time;
+        if (~rst && ((fsm_state & (fsm_state - 13'd1)) != 13'd0 || fsm_state == 13'd0)) begin
             $display("ERROR: fsm_state no es one-hot: %b (t=%0t)", fsm_state, $time);
             errors = errors + 1;
         end
@@ -359,6 +372,58 @@ module debug_unit_tb;
         lat_ifid = {320'd0, instr, pc};
     endfunction
 
+    // Programa a cargar
+    reg [31:0] prog [0:1023];
+
+    // LOAD de las primeras n palabras de prog; espera el ACK con words y xor
+    // y verifica que core_reset llego antes de la primera escritura (D10)
+    task load_prog(input [8*64-1:0] name, input integer n);
+        integer   k, j;
+        reg [7:0] x;
+        reg [31:0] w;
+        begin
+            x       = 8'h00;
+            load_t0 = $time;
+            send(8'h02);
+            send(n[7:0]);
+            send(n[15:8]);
+            for (k = 0; k < n; k = k + 1) begin
+                w = prog[k];
+                for (j = 0; j < 4; j = j + 1) begin
+                    send(w[8*j +: 8]);
+                    x = x ^ w[8*j +: 8];
+                end
+            end
+            expect_bytes(name, 8, {x, n[15:8], n[7:0], 8'h02, 8'h00, 8'h04, 8'h10, 8'hAA});
+            if (!(cr_t > load_t0 && we_t > cr_t)) begin
+                $display("ERROR %0s: no hubo core_reset antes de escribir la imem", name);
+                errors = errors + 1;
+            end
+        end
+    endtask
+
+    // La imem tiene prog[0..n-1] y ceros en el resto
+    task check_imem(input [8*64-1:0] name, input integer n);
+        integer    k, bad;
+        reg [31:0] e;
+        begin
+            bad = 0;
+            for (k = 0; k < 1024; k = k + 1) begin
+                e = (k < n) ? prog[k] : 32'h0;
+                if (u_core.imem[k] !== e) begin
+                    if (bad < 4)
+                        $display("ERROR %0s: imem[%0d] = %h, esperado %h",
+                                 name, k, u_core.imem[k], e);
+                    bad = bad + 1;
+                end
+            end
+            if (bad > 0) begin
+                $display("ERROR %0s: %0d palabras distintas", name, bad);
+                errors = errors + 1;
+            end
+        end
+    endtask
+
     task ping(input [8*64-1:0] name);
         begin
             send(8'h01);
@@ -372,60 +437,87 @@ module debug_unit_tb;
     integer ce0;
 
     initial begin
-        // Programa en la imem del stub: 4 NOP y ebreak (el loader llega en DBG-3)
-        for (i = 0; i < 4; i = i + 1) u_core.imem[i] = NOP;
-        u_core.imem[4] = EBREAK;
+        // imem sucia: despues de un LOAD solo tiene que quedar el programa nuevo
+        for (i = 0; i < 1024; i = i + 1) u_core.imem[i] = 32'hDEAD0000 | i;
 
         wait_cycles(5);
         rst = 1'b0;
 
         // 1. PING (todavia con reset_busy del reset de placa: no importa)
         ping("PING");
-
-        // 2. Comando desconocido
         send(8'h7F);
         expect_nack("cmd desconocido", 8'h7F, 8'h01);
         send(8'h00);
         expect_nack("cmd 0x00", 8'h00, 8'h01);
         ping("PING tras desconocido");
 
-        // 3. STEP x3: ce un solo ciclo por STEP
-        for (i = 1; i <= 3; i = i + 1) begin
+        // 2. El core avanza sobre la imem vieja y despues se carga el programa A
+        send(8'h04);
+        expect_dump("STEP sobre imem vieja", 8'h08, 4, lat_ifid(32'hDEAD0000, 0));
+        send(8'h04);
+        expect_dump("STEP sobre imem vieja", 8'h08, 8, lat_ifid(32'hDEAD0001, 4));
+
+        prog[0] = 32'h00100093;                     // addi x1, x0, 1
+        prog[1] = 32'h00200113;                     // addi x2, x0, 2
+        prog[2] = 32'h00300193;                     // addi x3, x0, 3
+        prog[3] = 32'h00400213;                     // addi x4, x0, 4
+        prog[4] = EBREAK;
+        load_prog("LOAD A", 5);
+        check_imem("imem tras LOAD A", 5);
+        send(8'h07);
+        expect_dump("DUMP tras LOAD", 8'h04, 0, 384'd0);   // PC 0, pipeline vacio
+
+        // 3. N STEP tras LOAD de N palabras: IF/ID muestra la palabra N-esima
+        for (i = 1; i <= 5; i = i + 1) begin
             ce0 = ce_cnt;
             send(8'h04);
-            expect_dump("STEP", 8'h08, 4 * i, lat_ifid(NOP, 4 * (i - 1)));
+            expect_dump("STEP tras LOAD", 8'h08, 4 * i, lat_ifid(prog[i - 1], 4 * (i - 1)));
             check("ciclos de ce en STEP", ce_cnt - ce0, 1);
         end
-
-        // 4. DUMP no mueve el core
         ce0 = ce_cnt;
         send(8'h07);
-        expect_dump("DUMP", 8'h08, 12, lat_ifid(NOP, 8));
+        expect_dump("DUMP", 8'h08, 20, lat_ifid(EBREAK, 16));
         check("ciclos de ce en DUMP", ce_cnt - ce0, 0);
 
-        // 5. RUN hasta ebreak: busca NOP (pc 12) y ebreak (pc 16), y ebreak lo detiene
+        // 4. RUN: con ebreak en IF/ID se detiene en un ciclo
         ce0 = ce_cnt;
         send(8'h05);
-        expect_dump("RUN hasta HALT", 8'h05, 20, 384'd0);   // halted + pipeline_empty
-        check("ciclos de ce en RUN", ce_cnt - ce0, 3);
-
-        // 6. STEP con el core detenido
+        expect_dump("RUN hasta HALT", 8'h05, 20, 384'd0);  // halted + pipeline_empty
+        check("ciclos de ce en RUN", ce_cnt - ce0, 1);
         send(8'h04);
         expect_dump("STEP detenido", 8'h05, 20, 384'd0);
         send(8'h05);
         expect_dump("RUN detenido", 8'h05, 20, 384'd0);
 
-        // 7. STOP fuera de RUN y RESET
+        // 5. STOP fuera de RUN y RESET
         send(8'h06);
         expect_ack("STOP fuera de RUN", 8'h06);
         send(8'h03);
         expect_ack("RESET", 8'h03);
         check("reset_busy tras ACK de RESET", reset_busy, 0);
         send(8'h07);
-        expect_dump("DUMP tras RESET", 8'h04, 0, 384'd0);   // pipeline_empty
+        expect_dump("DUMP tras RESET", 8'h04, 0, 384'd0);
+        check_imem("RESET no toca la imem", 5);
 
-        // 8. RUN sin HALT (todo NOP): solo STOP lo detiene
-        for (i = 0; i < 1024; i = i + 1) u_core.imem[i] = NOP;
+        // 6. Segundo LOAD, mas corto: solo queda B y termina en el primer cero
+        prog[0] = 32'h00500293;                     // addi x5, x0, 5
+        prog[1] = 32'h00600313;                     // addi x6, x0, 6
+        load_prog("LOAD B", 2);
+        check_imem("imem tras LOAD B", 2);
+        send(8'h04);
+        expect_dump("STEP 1 de B", 8'h08, 4, lat_ifid(prog[0], 0));
+        send(8'h04);
+        expect_dump("STEP 2 de B", 8'h08, 8, lat_ifid(prog[1], 4));
+        send(8'h04);
+        expect_dump("STEP sobre el relleno", 8'h08, 12, lat_ifid(32'h0, 8));
+        send(8'h04);
+        expect_dump("ilegal en el relleno", 8'h07, 12, 384'd0);  // halted + illegal
+
+        // 7. LOAD de 1024 palabras (len maximo, sin relleno) y RUN sin HALT
+        for (i = 0; i < 1024; i = i + 1)
+            prog[i] = NOP | (i << 20);              // addi x0, x0, i
+        load_prog("LOAD 1024", 1024);
+        check_imem("imem tras LOAD 1024", 1024);
         send(8'h05);
         wait_cycles(1000);
         send(8'h01);                                // se descarta
@@ -436,29 +528,32 @@ module debug_unit_tb;
         // El PC depende del instante del STOP: tiene que coincidir con el del core
         expect_dump_live("STOP en RUN", 8'h08);
         check("IF/ID coherente con el PC tras STOP", dbg_if_id[31:0], dbg_pc - 4);
+        check("instr de IF/ID tras STOP", dbg_if_id[63:32], prog[(dbg_pc[11:2] - 1) % 1024]);
         ce0 = ce_cnt;
         wait_cycles(500);
         check("ce queda en 0 tras STOP", ce_cnt - ce0, 0);
-        check("PC alineado tras STOP", dbg_pc[1:0], 0);
         if (dbg_pc < 32'd40) begin
             $display("ERROR: el core no corrio durante RUN (PC=%0h)", dbg_pc);
             errors = errors + 1;
         end
         ping("PING tras RUN/STOP");
 
-        // 9. Tramas truncadas
+        // 8. Tramas truncadas
         send(8'h02);
         send(8'h05);                                // falta el byte alto de len
         expect_silence("LOAD truncado antes del timeout", TMO - 400);
-        expect_nack("LOAD truncado", 8'h02, 8'h02);
+        expect_nack("LOAD truncado en len", 8'h02, 8'h02);
+        send(8'h02);                                // sin argumentos
+        expect_nack("LOAD sin len", 8'h02, 8'h02);
+        send(8'h02); send(8'h02); send(8'h00);      // len = 2
+        send(8'h13); send(8'h00); send(8'h00);      // faltan 5 bytes de datos
+        expect_nack("LOAD truncado en los datos", 8'h02, 8'h02);
         send(8'h08);
         send(8'h00); send(8'h00); send(8'h04);      // falta un byte de count
         expect_nack("READ_DMEM truncado", 8'h08, 8'h02);
-        send(8'h02);                                // sin argumentos
-        expect_nack("LOAD sin len", 8'h02, 8'h02);
         ping("PING tras timeouts");
 
-        // 10. LOAD con len fuera de rango: un unico NACK, los datos se descartan
+        // 9. LOAD con len fuera de rango: un unico NACK, los datos se descartan
         send(8'h02); send(8'h00); send(8'h00);      // len = 0
         expect_nack("LOAD len=0", 8'h02, 8'h03);
         send(8'h02); send(8'h01); send(8'h04);      // len = 1025
@@ -467,25 +562,33 @@ module debug_unit_tb;
         expect_silence("datos de LOAD descartados", 3 * TMO);
         ping("PING tras BAD_ARG");
 
-        // 11. Errores de trama
+        // 10. Errores de trama
         send_raw(8'h01, 1'b0);                      // PING con stop en 0
         expect_nack("error de trama en IDLE", 8'h00, 8'h05);
         send(8'h02);
         wait_cycles(400);
         send_raw(8'h10, 1'b0);                      // len con stop en 0
         send_raw(8'h00, 1'b1);
-        expect_nack("error de trama en LOAD", 8'h02, 8'h05);
+        expect_nack("error de trama en len", 8'h02, 8'h05);
+        expect_silence("un solo NACK por error", 3 * TMO);
+        send(8'h02); send(8'h01); send(8'h00);      // len = 1
+        send(8'h13);
+        wait_cycles(800);
+        send_raw(8'h00, 1'b0);                      // dato con stop en 0
+        send_raw(8'h00, 1'b1);
+        send_raw(8'h00, 1'b1);
+        expect_nack("error de trama en datos", 8'h02, 8'h05);
         expect_silence("un solo NACK por error", 3 * TMO);
         ping("PING tras error de trama");
 
-        // 13. Volcado con patrones conocidos en latches y registros
+        // 11. Volcado con patrones conocidos en latches y registros
         pat_if_id  = 64'h0706050403020100;
         pat_id_ex  = 160'h1B1A191817161514131211100F0E0D0C0B0A0908;
         pat_ex_mem = 80'h2524232221201F1E1D1C;
         pat_mem_wb = 80'h2F2E2D2C2B2A29282726;
         pat_en     = 1'b1;
         send(8'h07);
-        expect_dump_live("DUMP con patrones", 8'h08);
+        expect_dump_live("DUMP con patrones", 8'h04);
 
         // Snapshot: cambiar los latches mientras se transmite no altera el volcado
         send(8'h07);
@@ -494,12 +597,11 @@ module debug_unit_tb;
         pat_id_ex  = ~pat_id_ex;
         pat_ex_mem = ~pat_ex_mem;
         pat_mem_wb = ~pat_mem_wb;
-        expect_dump("DUMP con latches cambiando", 8'h08, dbg_pc,
+        expect_dump("DUMP con latches cambiando", 8'h04, dbg_pc,
                     {~pat_mem_wb, ~pat_ex_mem, ~pat_id_ex, ~pat_if_id});
         pat_en = 1'b0;
 
-        // 12. Termina en IDLE
-        check("fsm_state en IDLE", fsm_state, 11'b1);
+        check("fsm_state en IDLE", fsm_state, 13'b1);
 
         if (errors == 0)
             $display("TEST PASSED: 0 errores");
@@ -510,7 +612,7 @@ module debug_unit_tb;
 
     // Watchdog
     initial begin
-        #20_000_000;
+        #100_000_000;
         $display("TEST FAILED: timeout del testbench");
         $finish;
     end

@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////
-// debug_unit - Debug Unit: FSM que atiende los comandos de la PC (DBG-2)
+// debug_unit - Debug Unit: FSM que atiende los comandos de la PC (DBG-2..4)
 //
 // Se conecta del lado de la UART a la interfaz tipo cola de uart.v
 // (r_data/rd_uart/rx_empty, w_data/wr_uart/tx_full, frame_err/rx_overrun/
@@ -16,8 +16,11 @@
 //                   (mientras corre solo se atiende STOP, D12)
 //   STOP  (0x06) -> fuera de RUN responde ACK
 //   DUMP  (0x07) -> DUMP
-//   LOAD  (0x02) y READ_DMEM (0x08): se reciben y validan los argumentos;
-//                   la ejecucion la agregan DBG-3 y DBG-5 (hoy: NACK 0x01).
+//   LOAD  (0x02) -> reset completo (D10), escribe len palabras en la imem
+//                   desde la direccion 0, rellena el resto con ceros y
+//                   responde ACK [0x02][words][xor] (DBG-3)
+//   READ_DMEM (0x08): se reciben y validan los argumentos; la ejecucion
+//                   llega con DBG-5 (hoy: NACK 0x01).
 //
 // Timeout: si dentro de una trama pasan TIMEOUT_CYCLES (10 ms) sin recibir
 // un byte, se responde NACK 0x02 y se vuelve a IDLE.
@@ -33,6 +36,11 @@
 //   status | PC | x0..x31 | IF/ID | ID/EX | EX/MEM | MEM/WB
 // status, PC y latches salen del snapshot; los registros se leen por
 // dbg_reg_addr/dbg_reg_data mientras se transmite (con ce=0 no cambian).
+//
+// Loader (DBG-3): LOAD_DATA arma cada palabra con 4 bytes little-endian y la
+// escribe en la imem en el ciclo en que llega el ultimo byte; LOAD_FILL
+// escribe una palabra en cero por ciclo desde len hasta 1023. words es la
+// cantidad de palabras escritas con datos y xor el XOR de los 4*len bytes.
 //
 // fsm_state expone el estado one-hot para los LEDs de la placa (INT-1).
 //////////////////////////////////////////////////////////////////////////////
@@ -86,7 +94,7 @@ module debug_unit
     input  wire [79:0]   dbg_mem_wb,
 
     // --- LEDs ---
-    output wire [10:0]   fsm_state
+    output wire [12:0]   fsm_state
 );
 
     // ------------------------------------------------------------------
@@ -119,22 +127,24 @@ module debug_unit
     // ------------------------------------------------------------------
     // Estados (one-hot)
     // ------------------------------------------------------------------
-    localparam [10:0] S_IDLE     = 11'b00000000001,  // espera un comando
-                      S_ARGS     = 11'b00000000010,  // recibe argumentos (LOAD, READ_DMEM)
-                      S_DRAIN    = 11'b00000000100,  // descarta el resto de una trama con error
-                      S_RST      = 11'b00000001000,  // pulso de core_reset
-                      S_RST_WAIT = 11'b00000010000,  // espera !reset_busy
-                      S_STEP     = 11'b00000100000,  // ce=1 un ciclo
-                      S_RUN      = 11'b00001000000,  // ce=1 hasta HALT o STOP
-                      S_HOLD     = 11'b00010000000,  // un ciclo con ce=0 antes del snapshot
-                      S_SNAP     = 11'b00100000000,  // copia el estado del core
-                      S_TX_PREP  = 11'b01000000000,  // prepara el byte (latencia de lectura)
-                      S_TX_WR    = 11'b10000000000;  // escribe el byte en la FIFO de Tx
+    localparam [12:0] S_IDLE      = 13'b0000000000001,  // espera un comando
+                      S_ARGS      = 13'b0000000000010,  // recibe argumentos (LOAD, READ_DMEM)
+                      S_DRAIN     = 13'b0000000000100,  // descarta el resto de una trama con error
+                      S_RST       = 13'b0000000001000,  // pulso de core_reset
+                      S_RST_WAIT  = 13'b0000000010000,  // espera !reset_busy
+                      S_STEP      = 13'b0000000100000,  // ce=1 un ciclo
+                      S_RUN       = 13'b0000001000000,  // ce=1 hasta HALT o STOP
+                      S_HOLD      = 13'b0000010000000,  // un ciclo con ce=0 antes del snapshot
+                      S_SNAP      = 13'b0000100000000,  // copia el estado del core
+                      S_TX_PREP   = 13'b0001000000000,  // prepara el byte (latencia de lectura)
+                      S_TX_WR     = 13'b0010000000000,  // escribe el byte en la FIFO de Tx
+                      S_LOAD_DATA = 13'b0100000000000,  // recibe las palabras del LOAD
+                      S_LOAD_FILL = 13'b1000000000000;  // rellena con ceros el resto de la imem
 
     // ------------------------------------------------------------------
     // Registros
     // ------------------------------------------------------------------
-    reg [10:0]   state_reg,    state_next;
+    reg [12:0]   state_reg,    state_next;
     reg [7:0]    cmd_reg,      cmd_next;       // comando en curso
     reg [2:0]    argc_reg,     argc_next;      // bytes de argumento recibidos
     reg [31:0]   args_reg,     args_next;      // argumentos (little-endian)
@@ -146,6 +156,13 @@ module debug_unit
     reg [15:0]   rsp_len_reg,  rsp_len_next;
     reg [31:0]   rsp_pl_reg,   rsp_pl_next;    // payload de ACK/NACK (hasta 4 B)
     reg [7:0]    tx_idx_reg,   tx_idx_next;    // byte de la trama que se envia
+
+    // Loader
+    reg [10:0]   len_reg,      len_next;       // palabras a recibir (1..1024)
+    reg [10:0]   widx_reg,     widx_next;      // proxima palabra de la imem
+    reg [1:0]    bcnt_reg,     bcnt_next;      // byte dentro de la palabra
+    reg [23:0]   wbuf_reg,     wbuf_next;      // bytes 0..2 de la palabra en curso
+    reg [7:0]    xor_reg,      xor_next;       // XOR de los bytes de datos
 
     // Snapshot del volcado
     reg [7:0]    snap_status_reg, snap_status_next;
@@ -223,6 +240,11 @@ module debug_unit
             rsp_len_reg     <= 16'd0;
             rsp_pl_reg      <= 32'h0;
             tx_idx_reg      <= 8'd0;
+            len_reg         <= 11'd0;
+            widx_reg        <= 11'd0;
+            bcnt_reg        <= 2'd0;
+            wbuf_reg        <= 24'h0;
+            xor_reg         <= 8'h00;
             snap_status_reg <= 8'h00;
             snap_pc_reg     <= 32'h0;
             snap_lat_reg    <= 384'h0;
@@ -238,6 +260,11 @@ module debug_unit
             rsp_len_reg     <= rsp_len_next;
             rsp_pl_reg      <= rsp_pl_next;
             tx_idx_reg      <= tx_idx_next;
+            len_reg         <= len_next;
+            widx_reg        <= widx_next;
+            bcnt_reg        <= bcnt_next;
+            wbuf_reg        <= wbuf_next;
+            xor_reg         <= xor_next;
             snap_status_reg <= snap_status_next;
             snap_pc_reg     <= snap_pc_next;
             snap_lat_reg    <= snap_lat_next;
@@ -279,6 +306,11 @@ module debug_unit
         rsp_len_next     = rsp_len_reg;
         rsp_pl_next      = rsp_pl_reg;
         tx_idx_next      = tx_idx_reg;
+        len_next         = len_reg;
+        widx_next        = widx_reg;
+        bcnt_next        = bcnt_reg;
+        wbuf_next        = wbuf_reg;
+        xor_next         = xor_reg;
         snap_status_next = snap_status_reg;
         snap_pc_next     = snap_pc_reg;
         snap_lat_next    = snap_lat_reg;
@@ -335,8 +367,11 @@ module debug_unit
                         if (cmd_reg == CMD_LOAD) begin
                             if (load_len == 16'd0 || load_len > IMEM_WORDS)
                                 drain(E_BAD_ARG);       // los datos van a llegar igual
-                            else
-                                drain(E_UNKNOWN_CMD);   // PROVISORIO: LOAD llega en DBG-3
+                            else begin
+                                // Reset completo antes de escribir (D10)
+                                len_next   = load_len[10:0];
+                                state_next = S_RST;
+                            end
                         end
                         else begin
                             // READ_DMEM: la trama ya termino, la ejecucion es de DBG-5
@@ -368,8 +403,59 @@ module debug_unit
             end
 
             S_RST_WAIT: begin
-                if (~reset_busy)
-                    respond(T_ACK, 16'd1, {24'h0, CMD_RESET});
+                if (~reset_busy) begin
+                    if (cmd_reg == CMD_LOAD) begin
+                        // Los datos que llegaron mientras tanto esperan en la FIFO
+                        widx_next  = 11'd0;
+                        bcnt_next  = 2'd0;
+                        xor_next   = 8'h00;
+                        tmo_next   = {TW{1'b0}};
+                        state_next = S_LOAD_DATA;
+                    end
+                    else
+                        respond(T_ACK, 16'd1, {24'h0, CMD_RESET});
+                end
+            end
+
+            S_LOAD_DATA: begin
+                if (uart_err) begin
+                    clr_err = 1'b1;
+                    drain(E_UART_ERR);
+                end
+                else if (~rx_empty) begin
+                    rd_uart  = 1'b1;
+                    tmo_next = {TW{1'b0}};
+                    xor_next = xor_reg ^ r_data;
+                    if (bcnt_reg == 2'd3) begin
+                        imem_we    = 1'b1;
+                        imem_addr  = widx_reg[9:0];
+                        imem_wdata = {r_data, wbuf_reg};
+                        widx_next  = widx_reg + 11'd1;
+                        bcnt_next  = 2'd0;
+                        if (widx_reg + 11'd1 == len_reg)
+                            state_next = S_LOAD_FILL;
+                    end
+                    else begin
+                        wbuf_next[8*bcnt_reg +: 8] = r_data;
+                        bcnt_next                  = bcnt_reg + 2'd1;
+                    end
+                end
+                else if (tmo_done)
+                    respond(T_NACK, 16'd2, {16'h0, E_TIMEOUT, cmd_reg});
+                else
+                    tmo_next = tmo_inc;
+            end
+
+            S_LOAD_FILL: begin
+                // Relleno con ceros: una palabra por ciclo hasta el final de la imem
+                if (widx_reg == IMEM_WORDS[10:0])
+                    respond(T_ACK, 16'd4, {xor_reg, 5'd0, len_reg, CMD_LOAD});
+                else begin
+                    imem_we    = 1'b1;
+                    imem_addr  = widx_reg[9:0];
+                    imem_wdata = 32'h0;
+                    widx_next  = widx_reg + 11'd1;
+                end
             end
 
             S_STEP: begin
