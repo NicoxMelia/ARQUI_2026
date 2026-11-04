@@ -85,5 +85,6 @@ Fuente de verdad: las [issues](https://github.com/NicoxMelia/ARQUI_2026/issues) 
 | D9 | Baud rate 115200 | #2, #12 |
 | D10 | LOAD hace reset completo | #2, #14 |
 | D11 | `dmem_hwm` y volcado del rango usado | #3, #27 |
+| D14 | Errores a mitad de trama: descartar hasta silencio y después NACK | #13 |
 
 Las decisiones nuevas toman el siguiente número libre y se anotan en `decisiones.md`.

@@ -79,6 +79,38 @@ Plantilla:
 - **Por qué:** compuertar el clock genera dominios de reloj extra, skew y problemas de timing en la implementación (además de que complica el análisis de TIME-2). Con `ce` el análisis de timing sigue siendo el de un solo clock y las BRAM usan su enable nativo.
 - **Issue:** #3, #13
 
+### Diagrama de estados de la Debug Unit (DBG-2)
+
+`src/debug_unit.v` es una FSM one-hot. `ce` solo vale 1 en `STEP` (un ciclo) y en `RUN`; `core_reset` solo en `RST`. Ninguno de los dos sube mientras el core tiene `reset_busy`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> TX_PREP: PING, STOP / ACK; desconocido / NACK 0x01
+    IDLE --> ARGS: LOAD, READ_DMEM
+    IDLE --> RST: RESET
+    IDLE --> STEP: STEP
+    IDLE --> RUN: RUN
+    IDLE --> HOLD: DUMP
+    IDLE --> DRAIN: error de UART (NACK 0x05)
+    ARGS --> ARGS: byte de argumento
+    ARGS --> TX_PREP: timeout / NACK 0x02
+    ARGS --> DRAIN: BAD_ARG, UART_ERR
+    DRAIN --> DRAIN: byte recibido (se descarta)
+    DRAIN --> TX_PREP: 10 ms sin bytes / NACK
+    RST --> RST_WAIT: core_reset = 1
+    RST_WAIT --> TX_PREP: !reset_busy / ACK
+    STEP --> HOLD: !reset_busy, ce = 1 un ciclo
+    RUN --> HOLD: halted && pipeline_empty, o STOP
+    HOLD --> SNAP: ce = 0 un ciclo
+    SNAP --> TX_PREP: copia PC, status y latches
+    TX_PREP --> TX_WR
+    TX_WR --> TX_PREP: !tx_full, quedan bytes
+    TX_WR --> IDLE: ultimo byte
+```
+
+`TX_PREP` + `TX_WR` mandan un byte cada dos ciclos (como mínimo): el primero es la espera de la latencia de 1 ciclo de `dbg_reg_*`/`dbg_dmem_*` (D8). La UART es miles de veces más lenta, así que no cuesta nada. El vector `fsm_state` sale del módulo para los LEDs de la placa.
+
 ## D8 - Interfaz Debug Unit <-> Core
 
 - **Contexto:** la Debug Unit necesita cargar la imem, controlar el avance y leer el estado completo del core.
@@ -99,3 +131,11 @@ Plantilla:
 - **Elección:** (c) más (b): el core expone `dmem_hwm` (13 bits) = **mayor dirección de byte escrita + 1** (0 = vacía); se reinicia con `core_reset`. READ_DMEM con `count = 0` devuelve `ceil(dmem_hwm / 4)` palabras desde `addr`. El DUMP no incluye la dmem.
 - **Por qué:** guardar "dirección + 1" evita un bit extra para distinguir "vacía" de "se escribió la dirección 0", y los programas típicos usan pocos bytes de dmem. Sacar la dmem del DUMP mantiene el volcado en 181 B fijos.
 - **Issue:** #3, #27
+
+## D14 - Errores a mitad de trama: descartar hasta silencio y después NACK
+
+- **Contexto:** los comandos no llevan SOF ni largo total (SPEC-2). Si una trama falla a mitad de camino (por ejemplo, LOAD con `len` fuera de rango o un error de trama en la UART), el resto de sus bytes sigue llegando; si la FSM vuelve a IDLE enseguida, los interpreta como comandos y responde basura (los datos de un LOAD contienen bytes `0x01`..`0x08`).
+- **Opciones:** (a) NACK inmediato y volver a IDLE; (b) NACK inmediato y descartar lo que llegue después; (c) descartar todo lo que llegue hasta que la línea quede 10 ms en silencio (el mismo timeout de trama) y recién ahí responder el NACK.
+- **Elección:** (c), para BAD_ARG y UART_ERR. Un error de UART en IDLE (no hay comando válido) se informa como NACK con `cmd = 0x00`. TIMEOUT ya llega con la línea en silencio y se responde enseguida; UNKNOWN_CMD es una trama de un byte y también.
+- **Por qué:** con (a) un LOAD rechazado generaría decenas de respuestas espurias. Con (b) el PC recibe el NACK mientras sigue enviando y podría mandar el comando siguiente antes de que la FSM termine de descartar. Con (c) el NACK llega cuando la FPGA ya está en IDLE y limpia, así que el PC puede reintentar enseguida. Cuesta 10 ms de latencia en un caso de error, que es irrelevante. Durante el descarte se mantiene `clr_err` para que los errores de esos bytes no generen un segundo NACK.
+- **Issue:** #13

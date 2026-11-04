@@ -83,6 +83,8 @@ Formato: `[SOF 0xAA][tipo 1 B][len 2 B][payload len B]`. `len` es la longitud de
 
 En NACK por UNKNOWN_CMD, `cmd` es el byte recibido. Después de cualquier NACK la Debug Unit vuelve a IDLE y descarta lo que quede de la trama.
 
+Cómo se descarta (D14): ante BAD_ARG o UART_ERR la Debug Unit descarta todo lo que llegue hasta que pasen 10 ms sin bytes y **recién entonces** envía el NACK, ya en IDLE. Así el resto de la trama (por ejemplo los datos de un LOAD rechazado) no se interpreta como comandos, y cuando el PC recibe el NACK puede reintentar enseguida. Un error de UART recibido en IDLE, cuando todavía no hay comando, se informa con `cmd = 0x00`.
+
 ### Timeout en la FPGA
 
 Si dentro de una trama pasan más de **10 ms** entre dos bytes consecutivos (≈ 115 tiempos de byte), la Debug Unit descarta la trama, responde NACK `0x02` y vuelve a IDLE. El contador se calcula con `CLK_FREQ` (1 000 000 ciclos a 100 MHz). Esto garantiza que una trama truncada nunca deja la FSM colgada (criterio de DBG-2).
@@ -218,4 +220,4 @@ stateDiagram-v2
     RESP --> IDLE: trama de respuesta enviada
 ```
 
-Los nombres de estados finales del RTL (LOADING, STOPPED, DUMPING, etc.) se definen en DBG-2; este diagrama solo fija el comportamiento observable desde la línea serie.
+Los estados reales del RTL están en el diagrama de D1 (`decisiones.md`, DBG-2); este diagrama solo fija el comportamiento observable desde la línea serie.
