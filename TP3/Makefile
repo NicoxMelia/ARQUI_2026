@@ -5,6 +5,7 @@
 #                          alguno no imprime "TEST PASSED: 0 errores"
 #   make list              lista los testbenches disponibles
 #   make vivado-only       lista los archivos que solo se prueban en Vivado
+#   make test-sw           corre los tests de Python de sw/ (sin placa)
 #   make clean             borra build/
 #
 # Cada testbench vive en sim/<nombre>.v y su modulo top se llama <nombre>.
@@ -19,6 +20,7 @@
 
 IVERILOG ?= iverilog
 VVP      ?= vvp
+PYTHON   ?= python3
 FLAGS    := -g2005 -Wall
 
 BUILD    := build
@@ -27,7 +29,7 @@ VIV_ONLY := $(shell grep -l "$(MARK):" src/*.v sim/*.v 2>/dev/null)
 SRCS     := $(filter-out $(VIV_ONLY),$(wildcard src/*.v))
 TBS      := $(basename $(notdir $(wildcard sim/*.v)))
 
-.PHONY: sim test list vivado-only clean
+.PHONY: sim test test-sw list vivado-only clean
 
 sim:
 ifndef TB
@@ -68,6 +70,9 @@ test:
 	echo; \
 	echo "OK: $$ok   FALLA: $$fail   REQUIERE VIVADO: $$skip   (fuentes excluidas: $(words $(filter src/%,$(VIV_ONLY))))"; \
 	exit $$((fail > 0))
+
+test-sw:
+	$(PYTHON) -m unittest discover -s sw -v
 
 list:
 	@echo $(TBS)
