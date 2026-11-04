@@ -64,6 +64,16 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+| Archivo | Contenido |
+|---|---|
+| `sw/protocol.py` | Tramas del protocolo y parseo del volcado (`Dump` con registros y latches) |
+| `sw/serial_link.py` | `DebugLink`: `load`, `step`, `run`, `stop`, `dump`, `read_dmem`, con timeouts y reintentos |
+| `sw/fake_serial.py` | `FakeSerial`: Debug Unit + `core_stub` emulados para probar sin placa |
+
+```bash
+make test-sw           # tests de Python, sin placa (python3 -m unittest discover -s sw)
+```
+
 ## Convenciones
 
 **Código** (las de TP2, para que todo el repo sea uniforme):
