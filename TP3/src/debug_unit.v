@@ -29,8 +29,10 @@
 // a un snapshot (SNAP) y se serializa desde esa copia. Cada byte de la
 // respuesta usa dos ciclos (TX_PREP + TX_WR) para respetar la latencia de
 // 1 ciclo de los puertos de lectura de debug del core.
-// PROVISORIO (DBG-2): el payload del DUMP es solo status + PC (5 B). DBG-4
-// lo completa al formato de 181 B de interfaz_core.md.
+// Payload del DUMP (DBG-4, 181 B, interfaz_core.md seccion 4):
+//   status | PC | x0..x31 | IF/ID | ID/EX | EX/MEM | MEM/WB
+// status, PC y latches salen del snapshot; los registros se leen por
+// dbg_reg_addr/dbg_reg_data mientras se transmite (con ce=0 no cambian).
 //
 // fsm_state expone el estado one-hot para los LEDs de la placa (INT-1).
 //////////////////////////////////////////////////////////////////////////////
@@ -109,7 +111,7 @@ module debug_unit
                      E_BAD_ARG     = 8'h03,
                      E_UART_ERR    = 8'h05;
 
-    localparam [15:0] DUMP_LEN     = 16'd5;      // PROVISORIO: status + PC
+    localparam [15:0] DUMP_LEN     = 16'd181;    // 133 + L, L = 8 + 20 + 10 + 10
     localparam [15:0] IMEM_WORDS   = 16'd1024;
 
     localparam TW = $clog2(TIMEOUT_CYCLES + 1);  // bits del contador de timeout
@@ -148,6 +150,7 @@ module debug_unit
     // Snapshot del volcado
     reg [7:0]    snap_status_reg, snap_status_next;
     reg [31:0]   snap_pc_reg,     snap_pc_next;
+    reg [383:0]  snap_lat_reg,    snap_lat_next;   // {MEM/WB, EX/MEM, ID/EX, IF/ID}
 
     // ------------------------------------------------------------------
     // Senales auxiliares
@@ -164,17 +167,25 @@ module debug_unit
     // len de LOAD: el byte alto es el que llega en este ciclo
     wire [15:0]  load_len   = {r_data, args_reg[7:0]};
 
-    // Byte del payload del DUMP (PROVISORIO: status + PC)
+    // Byte del payload del DUMP segun su offset (interfaz_core.md, seccion 4)
+    //   0        status
+    //   1..4     PC
+    //   5..132   x0..x31 (registro (p-5)/4, byte (p-5)%4)
+    //   133..180 latches (byte p-133 del snapshot)
+    wire [7:0]   pc_off     = pl_idx - 8'd1;
+    wire [7:0]   reg_off    = pl_idx - 8'd5;
+    wire [7:0]   lat_off    = pl_idx - 8'd133;
+
     reg  [7:0]   dump_byte;
     always @(*) begin
-        case (pl_idx)
-            8'd0:    dump_byte = snap_status_reg;
-            8'd1:    dump_byte = snap_pc_reg[7:0];
-            8'd2:    dump_byte = snap_pc_reg[15:8];
-            8'd3:    dump_byte = snap_pc_reg[23:16];
-            8'd4:    dump_byte = snap_pc_reg[31:24];
-            default: dump_byte = 8'h00;
-        endcase
+        if (pl_idx == 8'd0)
+            dump_byte = snap_status_reg;
+        else if (pl_idx < 8'd5)
+            dump_byte = snap_pc_reg[8*pc_off[1:0] +: 8];
+        else if (pl_idx < 8'd133)
+            dump_byte = dbg_reg_data[8*reg_off[1:0] +: 8];
+        else
+            dump_byte = snap_lat_reg[8*lat_off[5:0] +: 8];
     end
 
     // Byte de la trama de respuesta que corresponde a tx_idx
@@ -190,8 +201,11 @@ module debug_unit
         endcase
     end
 
-    // Los puertos de lectura de debug todavia no se usan (DBG-4, DBG-5)
-    assign dbg_reg_addr  = 5'd0;
+    // Registro a leer: queda fijo desde TX_PREP, asi el dato se muestrea en
+    // TX_WR un ciclo despues de poner la direccion (latencia de 1 ciclo, D8)
+    assign dbg_reg_addr  = reg_off[6:2];
+
+    // La lectura de la dmem llega con READ_DMEM (DBG-5)
     assign dbg_dmem_addr = 10'd0;
 
     // ------------------------------------------------------------------
@@ -211,6 +225,7 @@ module debug_unit
             tx_idx_reg      <= 8'd0;
             snap_status_reg <= 8'h00;
             snap_pc_reg     <= 32'h0;
+            snap_lat_reg    <= 384'h0;
         end
         else begin
             state_reg       <= state_next;
@@ -225,6 +240,7 @@ module debug_unit
             tx_idx_reg      <= tx_idx_next;
             snap_status_reg <= snap_status_next;
             snap_pc_reg     <= snap_pc_next;
+            snap_lat_reg    <= snap_lat_next;
         end
     end
 
@@ -265,6 +281,7 @@ module debug_unit
         tx_idx_next      = tx_idx_reg;
         snap_status_next = snap_status_reg;
         snap_pc_next     = snap_pc_reg;
+        snap_lat_next    = snap_lat_reg;
 
         rd_uart    = 1'b0;
         wr_uart    = 1'b0;
@@ -381,6 +398,7 @@ module debug_unit
             S_SNAP: begin
                 snap_status_next = {1'b0, dbg_valid, pipeline_empty, illegal, halted};
                 snap_pc_next     = dbg_pc;
+                snap_lat_next    = {dbg_mem_wb, dbg_ex_mem, dbg_id_ex, dbg_if_id};
                 respond(T_DUMP, DUMP_LEN, 32'h0);
             end
 

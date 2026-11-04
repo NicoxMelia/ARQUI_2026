@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////
-// debug_unit_tb - Testbench autochequeante de la Debug Unit (DBG-2)
+// debug_unit_tb - Testbench autochequeante de la Debug Unit (DBG-2, DBG-4)
 //
 // Sistema completo por la linea serie:
 //   UART "PC" (la maneja el testbench) <-> UART + debug_unit <-> core_stub
@@ -21,6 +21,12 @@
 //  10. LOAD con len fuera de rango -> un unico NACK 0x03 (se descartan datos).
 //  11. Error de trama en IDLE y a mitad de trama -> NACK 0x05.
 //  12. Nunca sube ce con reset_busy ni con core_reset.
+//  13. Volcado (DBG-4): todos los DUMP se comparan byte a byte (185 B) contra
+//      un modelo. Entre el stub y la DU el banco de registros pasa por un
+//      registro (latencia real de 1 ciclo, el peor caso del contrato) y con
+//      pat_en los latches y registros toman patrones distintos byte a byte
+//      para verificar el orden. Cambiar los latches mientras se transmite no
+//      altera el volcado (snapshot).
 // Despues de cada error se verifica con PING que la FSM no quedo colgada.
 //
 // Con Icarus:  make sim TB=debug_unit_tb
@@ -62,12 +68,16 @@ module debug_unit_tb;
     );
 
     // Bytes recibidos por la PC
-    reg  [7:0] rx_buf [0:1023];
+    reg  [7:0] rx_buf [0:16383];
     integer    rx_cnt = 0;
     integer    rx_pos = 0;          // proximo byte a verificar
 
     always @(posedge clk) begin
         if (~pc_rx_empty) begin
+            if (rx_cnt == 16384) begin
+                $display("TEST FAILED: se lleno el buffer de recepcion del testbench");
+                $finish;
+            end
             rx_buf[rx_cnt] <= pc_rdata;
             rx_cnt         <= rx_cnt + 1;
         end
@@ -105,6 +115,32 @@ module debug_unit_tb;
     wire [79:0]  dbg_ex_mem, dbg_mem_wb;
     wire [10:0]  fsm_state;
 
+    // Lo que ve la Debug Unit: el stub o, con pat_en, patrones conocidos
+    reg          pat_en  = 1'b0;
+    reg  [63:0]  pat_if_id;
+    reg  [159:0] pat_id_ex;
+    reg  [79:0]  pat_ex_mem, pat_mem_wb;
+    reg  [31:0]  reg_q;                         // banco con latencia de 1 ciclo
+
+    wire [63:0]  du_if_id   = pat_en ? pat_if_id  : dbg_if_id;
+    wire [159:0] du_id_ex   = pat_en ? pat_id_ex  : dbg_id_ex;
+    wire [79:0]  du_ex_mem  = pat_en ? pat_ex_mem : dbg_ex_mem;
+    wire [79:0]  du_mem_wb  = pat_en ? pat_mem_wb : dbg_mem_wb;
+    wire [383:0] lat_live   = {du_mem_wb, du_ex_mem, du_id_ex, du_if_id};
+
+    // Valor de x[a] visto por la DU. Sin pat_en es el banco falso del stub
+    // (x_i = i); con pat_en cada byte es distinto.
+    function [31:0] reg_model(input [4:0] a);
+        reg [7:0] b;
+        begin
+            b = {3'd0, a};
+            reg_model = pat_en ? {~b, b + 8'h40, b ^ 8'hC3, b} : dbg_reg_data;
+        end
+    endfunction
+
+    always @(posedge clk)
+        reg_q <= reg_model(dbg_reg_addr);
+
     debug_unit #(.CLK_FREQ(CLK_FREQ), .TIMEOUT_CYCLES(TMO)) dut (
         .clk(clk), .reset(rst),
         .rd_uart(du_rd), .rx_empty(du_rx_empty), .r_data(du_rdata),
@@ -112,12 +148,12 @@ module debug_unit_tb;
         .clr_err(du_clr_err), .frame_err(du_frame_err), .rx_overrun(du_rx_overrun),
         .ce(ce), .core_reset(core_reset), .reset_busy(reset_busy),
         .imem_we(imem_we), .imem_addr(imem_addr), .imem_wdata(imem_wdata),
-        .dbg_reg_addr(dbg_reg_addr), .dbg_reg_data(dbg_reg_data),
+        .dbg_reg_addr(dbg_reg_addr), .dbg_reg_data(reg_q),
         .dbg_dmem_addr(dbg_dmem_addr), .dbg_dmem_data(dbg_dmem_data),
         .halted(halted), .illegal(illegal), .pipeline_empty(pipeline_empty),
         .dmem_hwm(dmem_hwm), .dbg_valid(dbg_valid),
-        .dbg_pc(dbg_pc), .dbg_if_id(dbg_if_id), .dbg_id_ex(dbg_id_ex),
-        .dbg_ex_mem(dbg_ex_mem), .dbg_mem_wb(dbg_mem_wb),
+        .dbg_pc(dbg_pc), .dbg_if_id(du_if_id), .dbg_id_ex(du_id_ex),
+        .dbg_ex_mem(du_ex_mem), .dbg_mem_wb(du_mem_wb),
         .fsm_state(fsm_state)
     );
 
@@ -245,10 +281,83 @@ module debug_unit_tb;
         expect_bytes(name, 6, {code, cmd, 8'h00, 8'h02, 8'h11, 8'hAA});
     endtask
 
-    // DUMP provisorio de DBG-2: status + PC
-    task expect_dump(input [8*64-1:0] name, input [7:0] status, input [31:0] pc);
-        expect_bytes(name, 9, {pc, status, 8'h00, 8'h05, 8'h20, 8'hAA});
+    // Espera n bytes nuevos; ok = 0 si no llegaron
+    task wait_bytes(input [8*64-1:0] name, input integer n, output ok);
+        integer lim;
+        begin
+            lim = 0;
+            while (rx_cnt < rx_pos + n && lim < 400_000) begin
+                @(negedge clk);
+                lim = lim + 1;
+            end
+            ok = (rx_cnt >= rx_pos + n);
+            if (!ok) begin
+                $display("ERROR %0s: llegaron %0d de %0d bytes", name, rx_cnt - rx_pos, n);
+                errors = errors + 1;
+                rx_pos = rx_cnt;
+            end
+        end
     endtask
+
+    // Compara la trama DUMP (185 B) ya recibida con el modelo:
+    // [AA][20][B5 00][status][PC][x0..x31][IF/ID][ID/EX][EX/MEM][MEM/WB]
+    reg [7:0] exp_frame [0:184];
+    task compare_dump(input [8*64-1:0] name, input [7:0] status, input [31:0] pc,
+                      input [383:0] lat);
+        integer k, bad;
+        reg [31:0] r;
+        begin
+            exp_frame[0] = 8'hAA;
+            exp_frame[1] = 8'h20;
+            exp_frame[2] = 8'd181;
+            exp_frame[3] = 8'h00;
+            exp_frame[4] = status;
+            for (k = 0; k < 4; k = k + 1)
+                exp_frame[5 + k] = pc[8*k +: 8];
+            for (k = 0; k < 128; k = k + 1) begin
+                r = pat_en ? reg_model(k / 4) : (k / 4);
+                exp_frame[9 + k] = r[8*(k % 4) +: 8];
+            end
+            for (k = 0; k < 48; k = k + 1)
+                exp_frame[137 + k] = lat[8*k +: 8];
+            bad = 0;
+            for (k = 0; k < 185; k = k + 1)
+                if (rx_buf[rx_pos + k] !== exp_frame[k]) begin
+                    if (bad < 4)
+                        $display("ERROR %0s: byte %0d = %02h, esperado %02h",
+                                 name, k, rx_buf[rx_pos + k], exp_frame[k]);
+                    bad = bad + 1;
+                end
+            if (bad > 0) begin
+                $display("ERROR %0s: %0d bytes distintos en el volcado", name, bad);
+                errors = errors + 1;
+            end
+            rx_pos = rx_pos + 185;
+        end
+    endtask
+
+    task expect_dump(input [8*64-1:0] name, input [7:0] status, input [31:0] pc,
+                     input [383:0] lat);
+        reg ok;
+        begin
+            wait_bytes(name, 185, ok);
+            if (ok) compare_dump(name, status, pc, lat);
+        end
+    endtask
+
+    // Volcado de un core ya detenido: PC y latches tienen que ser los actuales
+    task expect_dump_live(input [8*64-1:0] name, input [7:0] status);
+        reg ok;
+        begin
+            wait_bytes(name, 185, ok);
+            if (ok) compare_dump(name, status, dbg_pc, lat_live);
+        end
+    endtask
+
+    // Latches del stub con IF/ID valido: solo IF/ID = {instr, pc}
+    function [383:0] lat_ifid(input [31:0] instr, input [31:0] pc);
+        lat_ifid = {320'd0, instr, pc};
+    endfunction
 
     task ping(input [8*64-1:0] name);
         begin
@@ -284,27 +393,27 @@ module debug_unit_tb;
         for (i = 1; i <= 3; i = i + 1) begin
             ce0 = ce_cnt;
             send(8'h04);
-            expect_dump("STEP", 8'h08, 4 * i);      // IF/ID valido
+            expect_dump("STEP", 8'h08, 4 * i, lat_ifid(NOP, 4 * (i - 1)));
             check("ciclos de ce en STEP", ce_cnt - ce0, 1);
         end
 
         // 4. DUMP no mueve el core
         ce0 = ce_cnt;
         send(8'h07);
-        expect_dump("DUMP", 8'h08, 12);
+        expect_dump("DUMP", 8'h08, 12, lat_ifid(NOP, 8));
         check("ciclos de ce en DUMP", ce_cnt - ce0, 0);
 
         // 5. RUN hasta ebreak: busca NOP (pc 12) y ebreak (pc 16), y ebreak lo detiene
         ce0 = ce_cnt;
         send(8'h05);
-        expect_dump("RUN hasta HALT", 8'h05, 20);   // halted + pipeline_empty
+        expect_dump("RUN hasta HALT", 8'h05, 20, 384'd0);   // halted + pipeline_empty
         check("ciclos de ce en RUN", ce_cnt - ce0, 3);
 
         // 6. STEP con el core detenido
         send(8'h04);
-        expect_dump("STEP detenido", 8'h05, 20);
+        expect_dump("STEP detenido", 8'h05, 20, 384'd0);
         send(8'h05);
-        expect_dump("RUN detenido", 8'h05, 20);
+        expect_dump("RUN detenido", 8'h05, 20, 384'd0);
 
         // 7. STOP fuera de RUN y RESET
         send(8'h06);
@@ -313,7 +422,7 @@ module debug_unit_tb;
         expect_ack("RESET", 8'h03);
         check("reset_busy tras ACK de RESET", reset_busy, 0);
         send(8'h07);
-        expect_dump("DUMP tras RESET", 8'h04, 0);   // pipeline_empty
+        expect_dump("DUMP tras RESET", 8'h04, 0, 384'd0);   // pipeline_empty
 
         // 8. RUN sin HALT (todo NOP): solo STOP lo detiene
         for (i = 0; i < 1024; i = i + 1) u_core.imem[i] = NOP;
@@ -324,12 +433,9 @@ module debug_unit_tb;
         expect_silence("bytes durante RUN", 2000);
         check("ce sigue en 1 durante RUN", ce, 1);
         send(8'h06);
-        expect_bytes("STOP en RUN (encabezado)", 5, {8'h08, 8'h00, 8'h05, 8'h20, 8'hAA});
         // El PC depende del instante del STOP: tiene que coincidir con el del core
-        wait (rx_cnt >= rx_pos + 4);
-        check("PC volcado tras STOP",
-              {rx_buf[rx_pos+3], rx_buf[rx_pos+2], rx_buf[rx_pos+1], rx_buf[rx_pos]}, dbg_pc);
-        rx_pos = rx_pos + 4;
+        expect_dump_live("STOP en RUN", 8'h08);
+        check("IF/ID coherente con el PC tras STOP", dbg_if_id[31:0], dbg_pc - 4);
         ce0 = ce_cnt;
         wait_cycles(500);
         check("ce queda en 0 tras STOP", ce_cnt - ce0, 0);
@@ -371,6 +477,26 @@ module debug_unit_tb;
         expect_nack("error de trama en LOAD", 8'h02, 8'h05);
         expect_silence("un solo NACK por error", 3 * TMO);
         ping("PING tras error de trama");
+
+        // 13. Volcado con patrones conocidos en latches y registros
+        pat_if_id  = 64'h0706050403020100;
+        pat_id_ex  = 160'h1B1A191817161514131211100F0E0D0C0B0A0908;
+        pat_ex_mem = 80'h2524232221201F1E1D1C;
+        pat_mem_wb = 80'h2F2E2D2C2B2A29282726;
+        pat_en     = 1'b1;
+        send(8'h07);
+        expect_dump_live("DUMP con patrones", 8'h08);
+
+        // Snapshot: cambiar los latches mientras se transmite no altera el volcado
+        send(8'h07);
+        wait (rx_cnt >= rx_pos + 10);
+        pat_if_id  = ~pat_if_id;
+        pat_id_ex  = ~pat_id_ex;
+        pat_ex_mem = ~pat_ex_mem;
+        pat_mem_wb = ~pat_mem_wb;
+        expect_dump("DUMP con latches cambiando", 8'h08, dbg_pc,
+                    {~pat_mem_wb, ~pat_ex_mem, ~pat_id_ex, ~pat_if_id});
+        pat_en = 1'b0;
 
         // 12. Termina en IDLE
         check("fsm_state en IDLE", fsm_state, 11'b1);
