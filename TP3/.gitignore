@@ -9,3 +9,6 @@ build/
 __pycache__/
 *.pyc
 .venv/
+
+# Listings del ensamblador (python sw/assembler.py x.s -l x.lst)
+*.lst

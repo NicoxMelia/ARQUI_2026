@@ -1,0 +1,15 @@
+{
+  "descripcion": "addi, add, sub y HALT: programa corto para CORE-5 e INT-3",
+  "sin_forwarding": true,
+  "halted": true,
+  "illegal": false,
+  "regs": {
+    "x1": "0x00000005",
+    "x2": "0x00000003",
+    "x3": "0xFFFFFFFF",
+    "x4": "0x00000008",
+    "x5": "0x00000002",
+    "x6": "0xFFFFFFFE",
+    "x7": "0x00000004"
+  }
+}

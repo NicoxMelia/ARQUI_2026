@@ -1,0 +1,23 @@
+{
+  "descripcion": "Extremos del inmediato de 12 bits, extensión de signo e inmediatos con el bit 30 en 1",
+  "sin_forwarding": true,
+  "halted": true,
+  "illegal": false,
+  "regs": {
+    "x1":  "0x00000064",
+    "x2":  "0x12345000",
+    "x10": "0x00000464",
+    "x11": "0xFFFFFC64",
+    "x12": "0x000007FF",
+    "x13": "0xFFFFF800",
+    "x14": "0x00000064",
+    "x15": "0x12344FFF",
+    "x16": 1,
+    "x17": 1,
+    "x18": "0x00000464",
+    "x19": "0x12345678",
+    "x20": "0x12345000",
+    "x21": "0x00000060",
+    "x22": "0x12345678"
+  }
+}
