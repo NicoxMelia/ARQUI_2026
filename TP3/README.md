@@ -69,6 +69,7 @@ pip install -r requirements.txt
 | `sw/protocol.py` | Tramas del protocolo y parseo del volcado (`Dump` con registros y latches) |
 | `sw/serial_link.py` | `DebugLink`: `load`, `step`, `run`, `stop`, `dump`, `read_dmem`, con timeouts y reintentos |
 | `sw/fake_serial.py` | `FakeSerial`: Debug Unit + `core_stub` emulados para probar sin placa |
+| `sw/assembler.py` | Ensamblador: `.s` → `.hex` (y listing con `-l`), labels, registros ABI y pseudoinstrucciones |
 
 ```bash
 make test-sw           # tests de Python, sin placa (python3 -m unittest discover -s sw)
