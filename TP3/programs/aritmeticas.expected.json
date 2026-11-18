@@ -1,0 +1,27 @@
+{
+  "descripcion": "add, sub, addi: overflow, negativos y x0 como destino",
+  "sin_forwarding": true,
+  "halted": true,
+  "illegal": false,
+  "regs": {
+    "x1":  "0x80000000",
+    "x2":  "0x00000001",
+    "x3":  "0xFFFFFFFF",
+    "x4":  "0x00000064",
+    "x5":  "0xFFFFFF9C",
+    "x10": "0x00000000",
+    "x11": "0xFFFFFFFE",
+    "x12": "0x7FFFFFFF",
+    "x13": "0x00000000",
+    "x14": "0x7FFFFFFF",
+    "x15": "0x80000000",
+    "x16": "0xFFFFFF9D",
+    "x17": "0x00000000",
+    "x18": "0x000000C8",
+    "x19": "0xFFFFFFFF",
+    "x20": "0x7FFFFFFF",
+    "x21": "0x000007FE",
+    "x22": "0xFFFFF801",
+    "x23": "0x00000064"
+  }
+}

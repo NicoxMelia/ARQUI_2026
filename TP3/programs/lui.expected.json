@@ -1,0 +1,18 @@
+{
+  "descripcion": "lui, lui a x0 y constantes de 32 bits con lui + addi",
+  "sin_forwarding": true,
+  "halted": true,
+  "illegal": false,
+  "regs": {
+    "x1":  "0x12345000",
+    "x2":  "0xFFFFF000",
+    "x3":  "0x80000000",
+    "x4":  "0x00001000",
+    "x5":  "0x00000000",
+    "x6":  "0xDEADBEEF",
+    "x7":  "0x12345678",
+    "x8":  "0x00ABC000",
+    "x9":  "0x12346000",
+    "x10": "0xFFFFF000"
+  }
+}

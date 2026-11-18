@@ -6,6 +6,7 @@
 #   make list              lista los testbenches disponibles
 #   make vivado-only       lista los archivos que solo se prueban en Vivado
 #   make test-sw           corre los tests de Python de sw/ (sin placa)
+#   make programs          reensambla programs/*.s -> programs/*.hex
 #   make clean             borra build/
 #
 # Cada testbench vive en sim/<nombre>.v y su modulo top se llama <nombre>.
@@ -29,7 +30,7 @@ VIV_ONLY := $(shell grep -l "$(MARK):" src/*.v sim/*.v 2>/dev/null)
 SRCS     := $(filter-out $(VIV_ONLY),$(wildcard src/*.v))
 TBS      := $(basename $(notdir $(wildcard sim/*.v)))
 
-.PHONY: sim test test-sw list vivado-only clean
+.PHONY: sim test test-sw programs list vivado-only clean
 
 sim:
 ifndef TB
@@ -73,6 +74,9 @@ test:
 
 test-sw:
 	$(PYTHON) -m unittest discover -s sw -v
+
+programs:
+	@for f in programs/*.s; do $(PYTHON) sw/assembler.py $$f || exit 1; done
 
 list:
 	@echo $(TBS)

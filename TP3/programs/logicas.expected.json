@@ -1,0 +1,28 @@
+{
+  "descripcion": "and, or, xor, andi, ori, xori con inmediatos extendidos con signo",
+  "sin_forwarding": true,
+  "halted": true,
+  "illegal": false,
+  "regs": {
+    "x1":  "0xF0F0F000",
+    "x2":  "0x0FF00000",
+    "x3":  "0x000000F0",
+    "x4":  "0xFFFFFFFF",
+    "x5":  "0x00000555",
+    "x10": "0x00F00000",
+    "x11": "0xFFF0F000",
+    "x12": "0xFF00F000",
+    "x13": "0x00000000",
+    "x14": "0x000005F5",
+    "x15": "0x0F0F0FFF",
+    "x16": "0x00000000",
+    "x17": "0x000007FF",
+    "x18": "0xF0F0F000",
+    "x19": "0x00000050",
+    "x20": "0xFFFFF8F0",
+    "x21": "0x000002AA",
+    "x22": "0x00000000",
+    "x23": "0xFFFFFF0F",
+    "x24": "0x000002AA"
+  }
+}
